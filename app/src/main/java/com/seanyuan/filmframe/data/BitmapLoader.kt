@@ -12,7 +12,17 @@ object BitmapLoader {
      * Loads a downsampled bitmap suitable for analysis (frame detection, preview).
      * Uses inSampleSize so we never decode the full 50MP RAW into memory.
      */
-    fun loadForAnalysis(context: Context, uri: Uri, targetMaxDim: Int = 1200): Bitmap? {
+    fun loadForAnalysis(context: Context, uri: Uri, targetMaxDim: Int = 1200): Bitmap? =
+        loadSampled(context, uri, targetMaxDim)
+
+    /**
+     * For export: load at up to 4096px on long edge. Caps high enough for print
+     * and 4K screens while bounding memory (50MP raw would blow up the bitmap).
+     */
+    fun loadForExport(context: Context, uri: Uri, targetMaxDim: Int = 4096): Bitmap? =
+        loadSampled(context, uri, targetMaxDim)
+
+    private fun loadSampled(context: Context, uri: Uri, targetMaxDim: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it, null, bounds)

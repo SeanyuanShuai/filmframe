@@ -127,6 +127,37 @@ data class ClassicTemplate(
     }
 }
 
+/**
+ * Pure-color mat — equal margins on all 4 sides, no text, no decoration.
+ *
+ * The default 7% margin lands between "framed print" and "mat board" — visually
+ * generous enough to read as intentional, narrow enough not to feel poster-y.
+ * Pair with a darker color (#0E0E0E) for the gallery dark-mount look.
+ */
+data class SolidTemplate(
+    val borderColor: Int = 0xFFFAFAFA.toInt(),
+    val marginPct: Float = 0.07f,
+) : FrameTemplate {
+
+    override val id = "solid"
+    override val displayName = "纯色"
+
+    override fun render(source: Bitmap, exif: PhotoExif?): Bitmap {
+        val srcW = source.width
+        val srcH = source.height
+        val longEdge = max(srcW, srcH)
+        val margin = (longEdge * marginPct).toInt()
+        val outW = srcW + margin * 2
+        val outH = srcH + margin * 2
+
+        val output = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        canvas.drawColor(borderColor)
+        canvas.drawBitmap(source, margin.toFloat(), margin.toFloat(), null)
+        return output
+    }
+}
+
 object FrameRenderer {
     /**
      * Crops the existing frame off the source bitmap before applying a new one.
