@@ -62,7 +62,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    onBatch: (List<Uri>) -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
@@ -89,6 +92,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             rendered = null
             currentTemplate = null
         }
+    }
+
+    val multiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)
+    ) { uris ->
+        if (uris.isNotEmpty()) onBatch(uris)
     }
 
     LaunchedEffect(selectedUri) {
@@ -230,6 +239,11 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
+                onPickMulti = {
+                    multiLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 onBackToOriginal = { rendered = null; currentTemplate = null },
                 onExport = { exportFullRes() },
             )
@@ -303,6 +317,7 @@ private fun BottomActions(
     rendering: Boolean,
     exporting: Boolean,
     onPick: () -> Unit,
+    onPickMulti: () -> Unit,
     onBackToOriginal: () -> Unit,
     onExport: () -> Unit,
 ) {
@@ -310,6 +325,10 @@ private fun BottomActions(
         if (!hasImage) {
             Button(onClick = onPick, modifier = Modifier.fillMaxWidth()) {
                 Text("导入照片")
+            }
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = onPickMulti, modifier = Modifier.fillMaxWidth()) {
+                Text("批处理多张")
             }
             return@Column
         }
