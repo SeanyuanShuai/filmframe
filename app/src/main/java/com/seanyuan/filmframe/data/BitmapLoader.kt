@@ -3,31 +3,37 @@ package com.seanyuan.filmframe.data
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import kotlin.math.max
+
+/**
+ * Wraps a loaded bitmap with provenance info — original pixel dimensions and
+ * whether we had to downsample to fit. Callers that promise the user "no loss"
+ * can read this back to warn when downsampled.
+ */
+data class LoadedBitmap(
+    val bitmap: Bitmap,
+    val originalWidth: Int,
+    val originalHeight: Int,
+    val downsampled: Boolean,
+)
 
 object BitmapLoader {
 
-    /**
-     * Loads a downsampled bitmap suitable for analysis (frame detection, preview).
-     * Uses inSampleSize so we never decode the full 50MP RAW into memory.
-     */
     fun loadForAnalysis(context: Context, uri: Uri, targetMaxDim: Int = 1200): Bitmap? =
-        loadSampled(context, uri, targetMaxDim)
+        loadSampled(context, uri, targetMaxDim)?.bitmap
 
     /**
-     * For export: load at up to 4096px on long edge. Caps high enough for print
-     * and 4K screens while bounding memory (50MP raw would blow up the bitmap).
+     * For export: try full resolution, fall back to ever-smaller caps on OOM.
+     * Returns LoadedBitmap so callers can tell if downsampling kicked in.
      */
-    /**
-     * For export: try full resolution, fall back to ever-smaller caps if memory
-     * doesn't permit. 8192 covers up to ~50 MP cleanly; 4096 is the safety net.
-     */
-    fun loadForExport(context: Context, uri: Uri): Bitmap? {
+    fun loadForExport(context: Context, uri: Uri): LoadedBitmap? {
         for (cap in intArrayOf(Int.MAX_VALUE, 8192, 6144, 4096)) {
             try {
-                val bmp = loadSampled(context, uri, cap)
-                if (bmp != null) return bmp
+                val loaded = loadSampled(context, uri, cap)
+                if (loaded != null) return loaded
             } catch (_: OutOfMemoryError) {
                 // try a smaller cap
             }
@@ -35,23 +41,73 @@ object BitmapLoader {
         return null
     }
 
-    private fun loadSampled(context: Context, uri: Uri, targetMaxDim: Int): Bitmap? {
+    private fun loadSampled(context: Context, uri: Uri, targetMaxDim: Int): LoadedBitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, bounds)
+        runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, bounds)
+            }
         }
-        val maxDim = max(bounds.outWidth, bounds.outHeight)
+        val originalW = bounds.outWidth
+        val originalH = bounds.outHeight
+        val maxDim = max(originalW, originalH)
         if (maxDim <= 0) return null
 
         var sample = 1
         while (maxDim / sample > targetMaxDim) sample *= 2
+        val downsampled = sample > 1
 
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sample
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
+        val raw = runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, opts)
+            }
+        }.getOrNull() ?: return null
+
+        val rotated = applyExifRotation(context, uri, raw)
+        return LoadedBitmap(
+            bitmap = rotated,
+            originalWidth = originalW,
+            originalHeight = originalH,
+            downsampled = downsampled,
+        )
+    }
+
+    /**
+     * Many phones store the sensor pixels in landscape and use the EXIF
+     * Orientation tag to indicate display rotation. If we ignore the tag, a
+     * portrait photo decodes as a landscape bitmap and the frame ends up
+     * wrapping the wrong axis.
+     */
+    private fun applyExifRotation(context: Context, uri: Uri, source: Bitmap): Bitmap {
+        val orientation = runCatching {
+            context.contentResolver.openInputStream(uri)?.use {
+                ExifInterface(it).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL,
+                )
+            }
+        }.getOrNull() ?: return source
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            else -> return source
+        }
+        return try {
+            Bitmap.createBitmap(source, 0, 0, source.width, source.height, matrix, true)
+                .also { if (it !== source) source.recycle() }
+        } catch (_: OutOfMemoryError) {
+            source
         }
     }
 }

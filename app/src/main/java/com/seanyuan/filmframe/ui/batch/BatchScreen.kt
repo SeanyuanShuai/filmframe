@@ -152,7 +152,7 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                                     context, full, template, item.stripFrame,
                                     watermark = watermark,
                                 )
-                                ImageExporter.saveToGallery(context, rendered, item.uri) != null
+                                ImageExporter.saveToGallery(context, rendered, item.uri, full.loaded) != null
                             }
                             if (ok) successCount++
                             exportProgress = (i + 1) to items.size

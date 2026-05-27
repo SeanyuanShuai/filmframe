@@ -80,6 +80,8 @@ fun HomeScreen(
 
     val watermark by Settings.watermark(context)
         .collectAsState(initial = WatermarkSettings.Default)
+    val lastTemplateId by Settings.lastTemplateId(context)
+        .collectAsState(initial = "classic")
 
     var showSettings by remember { mutableStateOf(false) }
 
@@ -152,6 +154,7 @@ fun HomeScreen(
         rendering = true
         currentTemplate = template
         stripFrameChoice = stripFrame
+        scope.launch { Settings.updateLastTemplate(context, template.id) }
         scope.launch {
             val out = withContext(Dispatchers.Default) {
                 val processed = ProcessedSource(
@@ -196,12 +199,15 @@ fun HomeScreen(
                     stripExistingFrame = stripFrame,
                     watermark = currentWatermark,
                 )
-                ImageExporter.saveToGallery(context, out, uri)
+                ImageExporter.saveToGallery(context, out, uri, full.loaded)
             }
             exporting = false
-            snackbar.showSnackbar(
-                if (saved != null) "已保存到 Pictures/FilmFrame/（保留原图格式）" else "导出失败，看 logcat"
-            )
+            val msg = when {
+                saved == null -> "导出失败，看 logcat"
+                saved.downsampled -> "已保存（实际 ${saved.outputWidth}px · 原图 ${saved.originalWidth}px，内存所限略缩）"
+                else -> "已保存到 Pictures/FilmFrame · ${saved.outputFormat} · ${saved.outputWidth}×${saved.outputHeight}"
+            }
+            snackbar.showSnackbar(msg)
         }
     }
 

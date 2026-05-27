@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
+import com.seanyuan.filmframe.data.LoadedBitmap
 import com.seanyuan.filmframe.data.PhotoExif
 import com.seanyuan.filmframe.data.WatermarkSettings
 
@@ -15,6 +16,7 @@ data class ProcessedSource(
     val source: Bitmap,
     val exif: PhotoExif,
     val detection: FrameDetectionResult,
+    val loaded: LoadedBitmap? = null,
 )
 
 /**
@@ -32,10 +34,10 @@ object FrameProcessor {
     }
 
     fun loadFullForExport(context: Context, uri: Uri): ProcessedSource? {
-        val source = BitmapLoader.loadForExport(context, uri) ?: return null
+        val loaded = BitmapLoader.loadForExport(context, uri) ?: return null
         val exif = ExifReader.read(context, uri)
-        val detection = FrameDetector.detect(source)
-        return ProcessedSource(source, exif, detection)
+        val detection = FrameDetector.detect(loaded.bitmap)
+        return ProcessedSource(loaded.bitmap, exif, detection, loaded)
     }
 
     fun render(

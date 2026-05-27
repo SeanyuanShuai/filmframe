@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import com.seanyuan.filmframe.data.PhotoExif
+import com.seanyuan.filmframe.data.WatermarkPosition
 import com.seanyuan.filmframe.data.WatermarkSettings
 import kotlin.math.max
 
@@ -304,11 +305,27 @@ private fun drawWatermark(
         typeface = Fonts.cormorantItalic(context)
         textSize = longEdge * 0.013f
         letterSpacing = 0.04f
-        textAlign = Paint.Align.RIGHT
     }
-    val padX = longEdge * 0.022f
-    val padY = longEdge * 0.022f
-    canvas.drawText(options.text, outWidth - padX, outHeight - padY, paint)
+    val pad = longEdge * 0.022f
+    val textHeight = paint.textSize
+    when (options.position) {
+        WatermarkPosition.TopLeft -> {
+            paint.textAlign = Paint.Align.LEFT
+            canvas.drawText(options.text, pad, pad + textHeight, paint)
+        }
+        WatermarkPosition.TopRight -> {
+            paint.textAlign = Paint.Align.RIGHT
+            canvas.drawText(options.text, outWidth - pad, pad + textHeight, paint)
+        }
+        WatermarkPosition.BottomLeft -> {
+            paint.textAlign = Paint.Align.LEFT
+            canvas.drawText(options.text, pad, outHeight - pad, paint)
+        }
+        WatermarkPosition.BottomRight -> {
+            paint.textAlign = Paint.Align.RIGHT
+            canvas.drawText(options.text, outWidth - pad, outHeight - pad, paint)
+        }
+    }
 }
 
 private fun composeTitle(exif: PhotoExif): String {

@@ -7,9 +7,20 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class ExportResult(
+    val uri: Uri,
+    val outputFormat: String,
+    val outputWidth: Int,
+    val outputHeight: Int,
+    val originalWidth: Int,
+    val originalHeight: Int,
+    val downsampled: Boolean,
+)
 
 object ImageExporter {
 
@@ -17,21 +28,22 @@ object ImageExporter {
 
     /**
      * Output format matches the source format whenever possible — keeps the
-     * generation count at 1 (decode → draw frame → encode once in same codec).
+     * generation count at 1.
      *
-     * Format-to-codec mapping:
-     *   JPEG  → JPEG quality 100  (still a re-encode, but same family; one DCT round)
-     *   PNG   → PNG               (truly lossless)
-     *   WEBP  → WEBP_LOSSLESS on API 30+, falls back to PNG below
-     *   HEIC  → JPEG quality 100  (Android Bitmap.compress can't write HEIC at all)
-     *   ??    → JPEG quality 100  (safest default for an unknown raster source)
-     *
-     * Note: JPEG fundamentally has DCT block-transform loss even at quality 100.
-     * It's "no perceivable loss" — not "zero loss". To get true zero loss for a
-     * JPEG source you'd need lossless transforms via libjpeg-turbo (out of scope
-     * for v0.1).
+     * JPEG  → JPEG quality 100 (one DCT round; near-lossless)
+     *         + copies source EXIF tags via ExifInterface so Lightroom etc see
+     *           the same camera/lens/GPS metadata as the original.
+     * PNG   → PNG  (truly lossless; EXIF preservation not supported by stock
+     *               ExifInterface for PNG so metadata is dropped for now)
+     * WEBP  → WEBP_LOSSLESS on API 30+, PNG fallback below
+     * HEIC  → JPEG quality 100  (Bitmap.compress can't write HEIF)
      */
-    fun saveToGallery(context: Context, bitmap: Bitmap, sourceUri: Uri): Uri? {
+    fun saveToGallery(
+        context: Context,
+        bitmap: Bitmap,
+        sourceUri: Uri,
+        loaded: LoadedBitmap? = null,
+    ): ExportResult? {
         val format = decideFormat(context, sourceUri)
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val filename = "FilmFrame_$timestamp.${format.ext}"
@@ -49,11 +61,11 @@ object ImageExporter {
         }
 
         val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        val outputUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: return null
 
         return try {
-            resolver.openOutputStream(uri)?.use { out ->
+            resolver.openOutputStream(outputUri)?.use { out ->
                 val compressFormat = when (format) {
                     ExportFormat.Jpeg -> Bitmap.CompressFormat.JPEG
                     ExportFormat.Png -> Bitmap.CompressFormat.PNG
@@ -61,7 +73,6 @@ object ImageExporter {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             Bitmap.CompressFormat.WEBP_LOSSLESS
                         } else {
-                            // pre-API 30 has no lossless WEBP — keep it lossless via PNG
                             Bitmap.CompressFormat.PNG
                         }
                     }
@@ -71,16 +82,43 @@ object ImageExporter {
                 }
             } ?: throw IllegalStateException("openOutputStream returned null")
 
+            if (format == ExportFormat.Jpeg) {
+                runCatching { copyExif(context, sourceUri, outputUri) }
+            }
+
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val finalize = ContentValues().apply {
                     put(MediaStore.Images.Media.IS_PENDING, 0)
                 }
-                resolver.update(uri, finalize, null, null)
+                resolver.update(outputUri, finalize, null, null)
             }
-            uri
+
+            ExportResult(
+                uri = outputUri,
+                outputFormat = format.ext.uppercase(),
+                outputWidth = bitmap.width,
+                outputHeight = bitmap.height,
+                originalWidth = loaded?.originalWidth ?: 0,
+                originalHeight = loaded?.originalHeight ?: 0,
+                downsampled = loaded?.downsampled ?: false,
+            )
         } catch (t: Throwable) {
-            resolver.delete(uri, null, null)
+            resolver.delete(outputUri, null, null)
             null
+        }
+    }
+
+    private fun copyExif(context: Context, sourceUri: Uri, outputUri: Uri) {
+        val sourceExif = context.contentResolver.openInputStream(sourceUri)?.use {
+            ExifInterface(it)
+        } ?: return
+
+        context.contentResolver.openFileDescriptor(outputUri, "rw")?.use { pfd ->
+            val outputExif = ExifInterface(pfd.fileDescriptor)
+            for (tag in EXIF_TAGS_TO_COPY) {
+                sourceExif.getAttribute(tag)?.let { outputExif.setAttribute(tag, it) }
+            }
+            outputExif.saveAttributes()
         }
     }
 
@@ -89,10 +127,7 @@ object ImageExporter {
         return when {
             "png" in mime -> ExportFormat.Png
             "webp" in mime -> ExportFormat.WebpLossless
-            // HEIC/HEIF: Android Bitmap.compress can't write back into the HEIF
-            // container, so JPEG 100 is the closest non-WebP option.
             "heic" in mime || "heif" in mime -> ExportFormat.Jpeg
-            // jpeg, jpg, or unknown raster — JPEG 100
             else -> ExportFormat.Jpeg
         }
     }
@@ -102,4 +137,38 @@ object ImageExporter {
         Png("image/png", "png"),
         WebpLossless("image/webp", "webp"),
     }
+
+    private val EXIF_TAGS_TO_COPY = listOf(
+        ExifInterface.TAG_MAKE,
+        ExifInterface.TAG_MODEL,
+        ExifInterface.TAG_LENS_MAKE,
+        ExifInterface.TAG_LENS_MODEL,
+        ExifInterface.TAG_FOCAL_LENGTH,
+        ExifInterface.TAG_FOCAL_LENGTH_IN_35MM_FILM,
+        ExifInterface.TAG_F_NUMBER,
+        ExifInterface.TAG_EXPOSURE_TIME,
+        ExifInterface.TAG_PHOTOGRAPHIC_SENSITIVITY,
+        ExifInterface.TAG_DATETIME,
+        ExifInterface.TAG_DATETIME_ORIGINAL,
+        ExifInterface.TAG_DATETIME_DIGITIZED,
+        ExifInterface.TAG_OFFSET_TIME,
+        ExifInterface.TAG_OFFSET_TIME_ORIGINAL,
+        ExifInterface.TAG_WHITE_BALANCE,
+        ExifInterface.TAG_FLASH,
+        ExifInterface.TAG_METERING_MODE,
+        ExifInterface.TAG_EXPOSURE_PROGRAM,
+        ExifInterface.TAG_EXPOSURE_MODE,
+        ExifInterface.TAG_SCENE_CAPTURE_TYPE,
+        ExifInterface.TAG_GPS_LATITUDE,
+        ExifInterface.TAG_GPS_LATITUDE_REF,
+        ExifInterface.TAG_GPS_LONGITUDE,
+        ExifInterface.TAG_GPS_LONGITUDE_REF,
+        ExifInterface.TAG_GPS_ALTITUDE,
+        ExifInterface.TAG_GPS_ALTITUDE_REF,
+        ExifInterface.TAG_GPS_TIMESTAMP,
+        ExifInterface.TAG_GPS_DATESTAMP,
+        ExifInterface.TAG_SOFTWARE,
+        ExifInterface.TAG_COPYRIGHT,
+        ExifInterface.TAG_ARTIST,
+    )
 }
