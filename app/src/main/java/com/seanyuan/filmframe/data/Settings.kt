@@ -28,11 +28,44 @@ data class WatermarkSettings(
     }
 }
 
+/**
+ * 4 export quality tiers. Each yields an ExportSpec that controls:
+ *   - maxLongEdge of the source bitmap (= ≈ output size minus margins)
+ *   - whether to force JPEG (true for Medium/Low, predictable file size)
+ *   - JPEG quality (or ignored for PNG / WEBP_LOSSLESS)
+ *
+ * Even Low keeps decent quality — JPEG 85 @ 2000px produces ~500KB-1.5MB
+ * for typical photos, NOT the few-hundred-KB nuclear-compression user
+ * pushed back on.
+ */
+enum class ExportQuality(
+    val displayName: String,
+    val subtitle: String,
+    val maxLongEdge: Int,
+    val forceJpeg: Boolean,
+    val jpegQuality: Int,
+) {
+    Original("原画", "保留原图格式与全部像素", Int.MAX_VALUE, false, 100),
+    High("高", "长边 4096 · 保留原图格式", 4096, false, 95),
+    Medium("中", "长边 2800 · JPEG 92 · 适合社交", 2800, true, 92),
+    Low("低", "长边 2000 · JPEG 85 · 体积更小", 2000, true, 85);
+
+    val isOriginal: Boolean get() = this == Original
+}
+
+data class AppSettings(
+    val watermark: WatermarkSettings,
+    val exportQuality: ExportQuality,
+    val autoRemoveExistingFrame: Boolean,
+)
+
 object Settings {
     private val WATERMARK_ENABLED = booleanPreferencesKey("watermark_enabled")
     private val WATERMARK_TEXT = stringPreferencesKey("watermark_text")
     private val WATERMARK_POSITION = stringPreferencesKey("watermark_position")
     private val LAST_TEMPLATE_ID = stringPreferencesKey("last_template_id")
+    private val EXPORT_QUALITY = stringPreferencesKey("export_quality")
+    private val AUTO_REMOVE_FRAME = booleanPreferencesKey("auto_remove_frame")
 
     fun watermark(context: Context): Flow<WatermarkSettings> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
@@ -61,6 +94,30 @@ object Settings {
     suspend fun updateLastTemplate(context: Context, id: String) {
         context.applicationContext.settingsDataStore.edit { prefs ->
             prefs[LAST_TEMPLATE_ID] = id
+        }
+    }
+
+    fun exportQuality(context: Context): Flow<ExportQuality> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            prefs[EXPORT_QUALITY]
+                ?.let { runCatching { ExportQuality.valueOf(it) }.getOrNull() }
+                ?: ExportQuality.Original
+        }
+
+    suspend fun updateExportQuality(context: Context, value: ExportQuality) {
+        context.applicationContext.settingsDataStore.edit { prefs ->
+            prefs[EXPORT_QUALITY] = value.name
+        }
+    }
+
+    fun autoRemoveExistingFrame(context: Context): Flow<Boolean> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            prefs[AUTO_REMOVE_FRAME] ?: true
+        }
+
+    suspend fun updateAutoRemoveExistingFrame(context: Context, value: Boolean) {
+        context.applicationContext.settingsDataStore.edit { prefs ->
+            prefs[AUTO_REMOVE_FRAME] = value
         }
     }
 }

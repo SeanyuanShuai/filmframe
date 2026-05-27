@@ -45,6 +45,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.seanyuan.filmframe.data.ExportQuality
 import com.seanyuan.filmframe.data.ImageExporter
 import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkSettings
@@ -75,6 +76,8 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
     val scope = rememberCoroutineScope()
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val lastTemplateId by Settings.lastTemplateId(context).collectAsState(initial = "classic")
+    val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
+    val autoRemoveExistingFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
 
     val items = remember(uris) {
         mutableStateListOf<BatchItem>().apply {
@@ -100,7 +103,7 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                 items[idx] = items[idx].copy(
                     processed = processed,
                     templatePreviews = previews,
-                    stripFrame = processed.detection.hasFrame,
+                    stripFrame = processed.detection.hasFrame && autoRemoveExistingFrame,
                 )
                 loadingDone++
             }
@@ -142,14 +145,17 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                         var successCount = 0
                         items.forEachIndexed { i, item ->
                             val ok = withContext(Dispatchers.IO) {
-                                val full = FrameProcessor.loadFullForExport(context, item.uri)
-                                    ?: return@withContext false
+                                val full = FrameProcessor.loadFullForExport(
+                                    context, item.uri, exportQuality.maxLongEdge,
+                                ) ?: return@withContext false
                                 val template = FrameRenderer.all.first { it.id == item.selectedTemplateId }
                                 val rendered = FrameProcessor.render(
                                     context, full, template, item.stripFrame,
                                     watermark = watermark,
                                 )
-                                ImageExporter.saveToGallery(context, rendered, item.uri, full.loaded) != null
+                                ImageExporter.saveToGallery(
+                                    context, rendered, item.uri, full.loaded, exportQuality,
+                                ) != null
                             }
                             if (ok) successCount++
                             exportProgress = (i + 1) to items.size

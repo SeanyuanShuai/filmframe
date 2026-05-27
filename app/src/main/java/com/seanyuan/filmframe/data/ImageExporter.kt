@@ -20,6 +20,7 @@ data class ExportResult(
     val originalWidth: Int,
     val originalHeight: Int,
     val downsampled: Boolean,
+    val quality: ExportQuality,
 )
 
 object ImageExporter {
@@ -27,24 +28,29 @@ object ImageExporter {
     private const val SUBFOLDER = "FilmFrame"
 
     /**
-     * Output format matches the source format whenever possible — keeps the
-     * generation count at 1.
+     * Output format & quality follow user's ExportQuality choice:
      *
-     * JPEG  → JPEG quality 100 (one DCT round; near-lossless)
-     *         + copies source EXIF tags via ExifInterface so Lightroom etc see
-     *           the same camera/lens/GPS metadata as the original.
-     * PNG   → PNG  (truly lossless; EXIF preservation not supported by stock
-     *               ExifInterface for PNG so metadata is dropped for now)
-     * WEBP  → WEBP_LOSSLESS on API 30+, PNG fallback below
-     * HEIC  → JPEG quality 100  (Bitmap.compress can't write HEIF)
+     *   Original / High → match source format (JPEG → JPEG, PNG → PNG,
+     *     WebP → WEBP_LOSSLESS where supported). One generation, lossless
+     *     where the source format allows it.
+     *   Medium / Low    → force JPEG with specified quality (92 / 85). User
+     *     trades source-format fidelity for predictable, smaller files.
+     *
+     * For JPEG outputs we copy the source EXIF (camera/lens/GPS/etc) into
+     * the new file so Lightroom & similar pipelines see the same metadata.
      */
     fun saveToGallery(
         context: Context,
         bitmap: Bitmap,
         sourceUri: Uri,
         loaded: LoadedBitmap? = null,
+        quality: ExportQuality = ExportQuality.Original,
     ): ExportResult? {
-        val format = decideFormat(context, sourceUri)
+        val format = if (quality.forceJpeg) {
+            ExportFormat.Jpeg
+        } else {
+            decideFormat(context, sourceUri)
+        }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
         val filename = "FilmFrame_$timestamp.${format.ext}"
 
@@ -77,7 +83,7 @@ object ImageExporter {
                         }
                     }
                 }
-                if (!bitmap.compress(compressFormat, 100, out)) {
+                if (!bitmap.compress(compressFormat, quality.jpegQuality, out)) {
                     throw IllegalStateException("bitmap compress ($compressFormat) failed")
                 }
             } ?: throw IllegalStateException("openOutputStream returned null")
@@ -101,6 +107,7 @@ object ImageExporter {
                 originalWidth = loaded?.originalWidth ?: 0,
                 originalHeight = loaded?.originalHeight ?: 0,
                 downsampled = loaded?.downsampled ?: false,
+                quality = quality,
             )
         } catch (t: Throwable) {
             resolver.delete(outputUri, null, null)

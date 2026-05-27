@@ -14,9 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.seanyuan.filmframe.data.ExportQuality
 import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkPosition
 import com.seanyuan.filmframe.data.WatermarkSettings
@@ -49,8 +50,12 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
-    var draft by remember(watermark) { mutableStateOf(watermark) }
+    val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
+    val autoRemoveFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
+
+    var draftWatermark by remember(watermark) { mutableStateOf(watermark) }
 
     Box(
         modifier = modifier
@@ -66,6 +71,55 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             TopBar(onBack = onBack)
             Spacer(Modifier.height(24.dp))
 
+            SectionTitle("画质")
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                    ExportQuality.values().forEach { quality ->
+                        QualityRow(
+                            quality = quality,
+                            selected = quality == exportQuality,
+                            onClick = { scope.launch { Settings.updateExportQuality(context, quality) } },
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+            SectionTitle("原图处理")
+            GlassSurface(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "自动去除原边框",
+                            color = GlassColors.OnSurface,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            "如 OPPO HASSELBLAD、小米 Leica 这类品牌水印边框",
+                            color = GlassColors.OnSurfaceFaint,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(
+                        checked = autoRemoveFrame,
+                        onCheckedChange = { v ->
+                            scope.launch { Settings.updateAutoRemoveExistingFrame(context, v) }
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = GlassColors.OnSurface,
+                            checkedTrackColor = GlassColors.Accent,
+                            uncheckedThumbColor = GlassColors.OnSurfaceFaint,
+                            uncheckedTrackColor = Color.White.copy(alpha = 0.08f),
+                        ),
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
             SectionTitle("水印")
             GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp)) {
@@ -84,8 +138,8 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                             )
                         }
                         Switch(
-                            checked = draft.enabled,
-                            onCheckedChange = { draft = draft.copy(enabled = it) },
+                            checked = draftWatermark.enabled,
+                            onCheckedChange = { draftWatermark = draftWatermark.copy(enabled = it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = GlassColors.OnSurface,
                                 checkedTrackColor = GlassColors.Accent,
@@ -94,11 +148,11 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                             ),
                         )
                     }
-                    if (draft.enabled) {
+                    if (draftWatermark.enabled) {
                         Spacer(Modifier.height(16.dp))
                         OutlinedTextField(
-                            value = draft.text,
-                            onValueChange = { draft = draft.copy(text = it) },
+                            value = draftWatermark.text,
+                            onValueChange = { draftWatermark = draftWatermark.copy(text = it) },
                             placeholder = { Text("例：© Sean Yuan", color = GlassColors.OnSurfaceFaint) },
                             label = { Text("水印文字", color = GlassColors.OnSurfaceMuted) },
                             singleLine = true,
@@ -123,8 +177,8 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                         )
                         Spacer(Modifier.height(8.dp))
                         PositionGrid(
-                            selected = draft.position,
-                            onSelect = { draft = draft.copy(position = it) },
+                            selected = draftWatermark.position,
+                            onSelect = { draftWatermark = draftWatermark.copy(position = it) },
                         )
                     }
                 }
@@ -142,11 +196,11 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
 
             Spacer(Modifier.height(32.dp))
             GlassButton(
-                text = "保存",
+                text = "保存水印 & 返回",
                 accent = true,
                 onClick = {
                     scope.launch {
-                        Settings.updateWatermark(context, draft.copy(text = draft.text.trim()))
+                        Settings.updateWatermark(context, draftWatermark.copy(text = draftWatermark.text.trim()))
                         onBack()
                     }
                 },
@@ -154,6 +208,49 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             )
             Spacer(Modifier.height(40.dp))
         }
+    }
+}
+
+@Composable
+private fun QualityRow(
+    quality: ExportQuality,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val bg = if (selected) GlassColors.AccentSoft else Color.Transparent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .background(bg)
+            .padding(horizontal = 20.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                quality.displayName,
+                color = if (selected) GlassColors.Accent else GlassColors.OnSurface,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            )
+            Text(
+                quality.subtitle,
+                color = GlassColors.OnSurfaceFaint,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .height(18.dp)
+                .width(18.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .border(
+                    if (selected) 5.dp else 1.dp,
+                    if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.25f),
+                    RoundedCornerShape(9.dp),
+                )
+                .background(if (selected) GlassColors.Accent else Color.Transparent),
+        )
     }
 }
 
@@ -202,8 +299,8 @@ private fun PositionGrid(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         for ((left, right) in cells) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PositionTile(left, selected == left) { onSelect(left) }
-                PositionTile(right, selected == right) { onSelect(right) }
+                PositionTile(left, selected == left, modifier = Modifier.weight(1f)) { onSelect(left) }
+                PositionTile(right, selected == right, modifier = Modifier.weight(1f)) { onSelect(right) }
             }
         }
     }
@@ -213,14 +310,14 @@ private fun PositionGrid(
 private fun PositionTile(
     position: WatermarkPosition,
     selected: Boolean,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val border = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.12f)
     val bg = if (selected) GlassColors.AccentSoft else Color.White.copy(alpha = 0.04f)
     Box(
-        modifier = Modifier
+        modifier = modifier
             .height(70.dp)
-            .fillMaxWidth(0.5f)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
             .border(
@@ -230,7 +327,6 @@ private fun PositionTile(
             )
             .clickable(onClick = onClick),
     ) {
-        // Render a tiny dot in the corresponding corner of the tile
         val dotPos = when (position) {
             WatermarkPosition.TopLeft -> Alignment.TopStart
             WatermarkPosition.TopRight -> Alignment.TopEnd

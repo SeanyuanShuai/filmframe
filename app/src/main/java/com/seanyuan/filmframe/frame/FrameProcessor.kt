@@ -33,8 +33,12 @@ object FrameProcessor {
         return ProcessedSource(source, exif, detection)
     }
 
-    fun loadFullForExport(context: Context, uri: Uri): ProcessedSource? {
-        val loaded = BitmapLoader.loadForExport(context, uri) ?: return null
+    fun loadFullForExport(
+        context: Context,
+        uri: Uri,
+        maxLongEdge: Int = Int.MAX_VALUE,
+    ): ProcessedSource? {
+        val loaded = BitmapLoader.loadForExport(context, uri, maxLongEdge) ?: return null
         val exif = ExifReader.read(context, uri)
         val detection = FrameDetector.detect(loaded.bitmap)
         return ProcessedSource(loaded.bitmap, exif, detection, loaded)

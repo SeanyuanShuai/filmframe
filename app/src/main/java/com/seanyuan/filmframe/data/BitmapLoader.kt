@@ -26,11 +26,20 @@ object BitmapLoader {
         loadSampled(context, uri, targetMaxDim)?.bitmap
 
     /**
-     * For export: try full resolution, fall back to ever-smaller caps on OOM.
-     * Returns LoadedBitmap so callers can tell if downsampling kicked in.
+     * For export: try the requested cap first, fall back to ever-smaller caps
+     * on OOM. Default behaves like "full resolution requested" path.
      */
-    fun loadForExport(context: Context, uri: Uri): LoadedBitmap? {
-        for (cap in intArrayOf(Int.MAX_VALUE, 8192, 6144, 4096)) {
+    fun loadForExport(context: Context, uri: Uri, maxLongEdge: Int = Int.MAX_VALUE): LoadedBitmap? {
+        val targets = if (maxLongEdge == Int.MAX_VALUE) {
+            intArrayOf(Int.MAX_VALUE, 8192, 6144, 4096)
+        } else {
+            intArrayOf(
+                maxLongEdge,
+                (maxLongEdge * 0.75).toInt().coerceAtLeast(1024),
+                (maxLongEdge * 0.5).toInt().coerceAtLeast(1024),
+            )
+        }
+        for (cap in targets) {
             try {
                 val loaded = loadSampled(context, uri, cap)
                 if (loaded != null) return loaded

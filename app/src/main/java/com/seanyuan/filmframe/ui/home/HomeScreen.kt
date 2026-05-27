@@ -49,6 +49,7 @@ import coil3.compose.AsyncImage
 import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
 import com.seanyuan.filmframe.data.ImageExporter
+import com.seanyuan.filmframe.data.ExportQuality
 import com.seanyuan.filmframe.data.PhotoExif
 import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkSettings
@@ -82,6 +83,8 @@ fun HomeScreen(
 
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val lastTemplateId by Settings.lastTemplateId(context).collectAsState(initial = "classic")
+    val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
+    val autoRemoveExistingFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -91,7 +94,6 @@ fun HomeScreen(
     var currentTemplate by remember { mutableStateOf<FrameTemplate?>(null) }
     var stripFrameChoice by remember { mutableStateOf(false) }
     var adjustments by remember { mutableStateOf(TemplateAdjustments.Default) }
-    var pendingTemplate by remember { mutableStateOf<FrameTemplate?>(null) }
     var showParams by remember { mutableStateOf(false) }
     var processingMsg by remember { mutableStateOf<String?>(null) }
     var resultSummary by remember { mutableStateOf<ResultSummary?>(null) }
@@ -125,13 +127,8 @@ fun HomeScreen(
         val detection = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
         frameResult = detection
 
-        val defaultTemplate = FrameRenderer.byId(lastTemplateId)
-        if (detection?.hasFrame == true) {
-            pendingTemplate = defaultTemplate
-        } else {
-            currentTemplate = defaultTemplate
-            stripFrameChoice = false
-        }
+        currentTemplate = FrameRenderer.byId(lastTemplateId)
+        stripFrameChoice = detection?.hasFrame == true && autoRemoveExistingFrame
     }
 
     LaunchedEffect(watermark, currentTemplate, adjustments, stripFrameChoice, sourceBitmap) {
@@ -166,10 +163,12 @@ fun HomeScreen(
         val w = watermark
         val adj = adjustments
         val strip = stripFrameChoice
-        processingMsg = "渲染并写入相册…"
+        val q = exportQuality
+        processingMsg = "渲染并写入相册 · ${q.displayName}"
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                val full = FrameProcessor.loadFullForExport(context, uri) ?: return@withContext null
+                val full = FrameProcessor.loadFullForExport(context, uri, q.maxLongEdge)
+                    ?: return@withContext null
                 val out = FrameProcessor.render(
                     context = context,
                     processed = full,
@@ -178,7 +177,7 @@ fun HomeScreen(
                     watermark = w,
                     adjustments = adj,
                 )
-                ImageExporter.saveToGallery(context, out, uri, full.loaded)
+                ImageExporter.saveToGallery(context, out, uri, full.loaded, q)
             }
             processingMsg = null
             if (result != null) {
@@ -224,6 +223,8 @@ fun HomeScreen(
                     selectedUri = selectedUri,
                     frameResult = frameResult,
                     currentTemplate = currentTemplate,
+                    stripFrameChoice = stripFrameChoice,
+                    onToggleStripFrame = { stripFrameChoice = !stripFrameChoice },
                     onSelectTemplate = ::pickTemplate,
                     onPickAnother = {
                         singleLauncher.launch(
@@ -246,35 +247,6 @@ fun HomeScreen(
                     onClose = { showParams = false },
                 )
             }
-        }
-
-        pendingTemplate?.let { template ->
-            AlertDialog(
-                onDismissRequest = { pendingTemplate = null },
-                title = { Text("照片已带边框") },
-                text = {
-                    Text("识别到这张照片已经有一圈现成边框（比如 OPPO HASSELBLAD、小米 Leica）。是否先移除再加 FilmFrame 自己的边框？")
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        pendingTemplate = null
-                        currentTemplate = template
-                        stripFrameChoice = true
-                        scope.launch { Settings.updateLastTemplate(context, template.id) }
-                    }) { Text("移除并重新加") }
-                },
-                dismissButton = {
-                    TextButton(onClick = {
-                        pendingTemplate = null
-                        currentTemplate = template
-                        stripFrameChoice = false
-                        scope.launch { Settings.updateLastTemplate(context, template.id) }
-                    }) { Text("保留直接套") }
-                },
-                containerColor = Color(0xFF1A1A1A),
-                titleContentColor = GlassColors.OnSurface,
-                textContentColor = GlassColors.OnSurfaceMuted,
-            )
         }
 
         processingMsg?.let {
@@ -398,6 +370,8 @@ private fun EditorPanel(
     selectedUri: Uri?,
     frameResult: FrameDetectionResult?,
     currentTemplate: FrameTemplate?,
+    stripFrameChoice: Boolean,
+    onToggleStripFrame: () -> Unit,
     onSelectTemplate: (FrameTemplate) -> Unit,
     onPickAnother: () -> Unit,
     onToggleParams: () -> Unit,
@@ -454,10 +428,25 @@ private fun EditorPanel(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    "原图已有边框 · 自动移除 · 置信度 ${(fr.confidence * 100).toInt()}%",
+                    text = if (stripFrameChoice) "原图已有边框 · 自动移除" else "原图已有边框 · 保留原状",
                     color = GlassColors.OnSurfaceMuted,
                     style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
                 )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .clickable(onClick = onToggleStripFrame)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                ) {
+                    Text(
+                        text = if (stripFrameChoice) "保留" else "移除",
+                        color = GlassColors.Accent,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
 
