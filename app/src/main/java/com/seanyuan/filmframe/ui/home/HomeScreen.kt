@@ -196,11 +196,11 @@ fun HomeScreen(
                     stripExistingFrame = stripFrame,
                     watermark = currentWatermark,
                 )
-                ImageExporter.saveToGallery(context, out)
+                ImageExporter.saveToGallery(context, out, uri)
             }
             exporting = false
             snackbar.showSnackbar(
-                if (saved != null) "已保存 PNG 无损图到 Pictures/FilmFrame/" else "导出失败，看 logcat"
+                if (saved != null) "已保存到 Pictures/FilmFrame/（保留原图格式）" else "导出失败，看 logcat"
             )
         }
     }
