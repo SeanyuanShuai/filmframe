@@ -6,28 +6,47 @@ import androidx.core.content.res.ResourcesCompat
 import com.seanyuan.filmframe.R
 
 /**
- * Lazy + cached Typeface accessors. Variable TTFs include all weight axes;
- * the system picks the matching instance based on Paint weight setting.
- * Falls back to platform fonts if the resource fails to load (defensive).
+ * Type stack — all SIL Open Font License (commercial use OK):
+ *   - Cormorant Garamond  (display serif, classical book feel, refined italic)
+ *   - DM Serif Display    (high-contrast display serif by Colophon Foundry)
+ *   - Inter               (geometric sans, modern, near-Helvetica neutrality)
+ *
+ * No CJK glyphs bundled by design; Latin-only with system fallback if needed.
  */
 object Fonts {
 
-    @Volatile private var garamondItalic: Typeface? = null
-    @Volatile private var garamond: Typeface? = null
+    @Volatile private var cormorantItalic: Typeface? = null
+    @Volatile private var cormorantRegular: Typeface? = null
+    @Volatile private var dmSerifDisplay: Typeface? = null
+    @Volatile private var dmSerifDisplayItalic: Typeface? = null
     @Volatile private var inter: Typeface? = null
 
-    fun garamondItalic(context: Context): Typeface = garamondItalic ?: synchronized(this) {
-        garamondItalic ?: (
-            ResourcesCompat.getFont(context.applicationContext, R.font.eb_garamond_italic)
+    fun cormorantItalic(context: Context): Typeface = cormorantItalic ?: synchronized(this) {
+        cormorantItalic ?: (
+            ResourcesCompat.getFont(context.applicationContext, R.font.cormorant_garamond_italic)
                 ?: Typeface.create(Typeface.SERIF, Typeface.ITALIC)
-            ).also { garamondItalic = it }
+            ).also { cormorantItalic = it }
     }
 
-    fun garamond(context: Context): Typeface = garamond ?: synchronized(this) {
-        garamond ?: (
-            ResourcesCompat.getFont(context.applicationContext, R.font.eb_garamond_regular)
+    fun cormorant(context: Context): Typeface = cormorantRegular ?: synchronized(this) {
+        cormorantRegular ?: (
+            ResourcesCompat.getFont(context.applicationContext, R.font.cormorant_garamond_regular)
                 ?: Typeface.SERIF
-            ).also { garamond = it }
+            ).also { cormorantRegular = it }
+    }
+
+    fun dmSerif(context: Context): Typeface = dmSerifDisplay ?: synchronized(this) {
+        dmSerifDisplay ?: (
+            ResourcesCompat.getFont(context.applicationContext, R.font.dm_serif_display_regular)
+                ?: Typeface.SERIF
+            ).also { dmSerifDisplay = it }
+    }
+
+    fun dmSerifItalic(context: Context): Typeface = dmSerifDisplayItalic ?: synchronized(this) {
+        dmSerifDisplayItalic ?: (
+            ResourcesCompat.getFont(context.applicationContext, R.font.dm_serif_display_italic)
+                ?: Typeface.create(Typeface.SERIF, Typeface.ITALIC)
+            ).also { dmSerifDisplayItalic = it }
     }
 
     fun inter(context: Context): Typeface = inter ?: synchronized(this) {

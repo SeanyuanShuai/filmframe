@@ -191,7 +191,7 @@ private fun drawClassicCaption(
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
-        typeface = Fonts.garamondItalic(context)
+        typeface = Fonts.cormorantItalic(context)
         textSize = titleSize
         letterSpacing = 0.14f
         textAlign = Paint.Align.CENTER
@@ -232,7 +232,7 @@ private fun drawBoldCaption(
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
-        typeface = Fonts.garamond(context)
+        typeface = Fonts.dmSerif(context)
         textSize = titleSize
         letterSpacing = 0.05f
         textAlign = Paint.Align.CENTER
@@ -271,7 +271,7 @@ private fun drawPolaroidCaption(
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
-        typeface = Fonts.garamondItalic(context)
+        typeface = Fonts.cormorantItalic(context)
         textSize = titleSize
         letterSpacing = 0.02f
         textAlign = Paint.Align.CENTER
