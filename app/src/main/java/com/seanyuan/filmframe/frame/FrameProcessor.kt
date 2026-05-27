@@ -46,12 +46,13 @@ object FrameProcessor {
         template: FrameTemplate,
         stripExistingFrame: Boolean,
         watermark: WatermarkSettings = WatermarkSettings.Default,
+        adjustments: TemplateAdjustments = TemplateAdjustments.Default,
     ): Bitmap {
         val base = if (stripExistingFrame && processed.detection.hasFrame) {
             FrameRenderer.deframe(processed.source, processed.detection.insets)
         } else {
             processed.source
         }
-        return template.render(context, base, processed.exif, watermark)
+        return template.render(context, base, processed.exif, watermark, adjustments)
     }
 }

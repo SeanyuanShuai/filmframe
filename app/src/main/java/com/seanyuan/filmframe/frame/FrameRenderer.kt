@@ -17,6 +17,7 @@ sealed interface FrameTemplate {
         source: Bitmap,
         exif: PhotoExif?,
         watermark: WatermarkSettings = WatermarkSettings.Default,
+        adjustments: TemplateAdjustments = TemplateAdjustments.Default,
     ): Bitmap
 }
 
@@ -35,14 +36,17 @@ data class ClassicTemplate(
     override val displayName = "Classic"
 
     override fun render(
-        context: Context, source: Bitmap, exif: PhotoExif?, watermark: WatermarkSettings,
+        context: Context, source: Bitmap, exif: PhotoExif?,
+        watermark: WatermarkSettings, adjustments: TemplateAdjustments,
     ): Bitmap {
-        val out = matCanvas(source, sideMarginPct, sideMarginPct, sideMarginPct, bottomMarginPct, borderColor)
+        val side = (sideMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val bottom = (bottomMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val out = matCanvas(source, side, side, side, bottom, borderColor)
         val canvas = Canvas(out)
         val longEdge = max(source.width, source.height)
-        val sideMargin = (longEdge * sideMarginPct).toInt()
-        val bottomMargin = (longEdge * bottomMarginPct).toInt()
-        if (exif != null) {
+        val sideMargin = (longEdge * side).toInt()
+        val bottomMargin = (longEdge * bottom).toInt()
+        if (exif != null && adjustments.showCaption) {
             drawClassicCaption(
                 context, canvas, exif,
                 canvasWidth = out.width,
@@ -51,6 +55,7 @@ data class ClassicTemplate(
                 longEdge = longEdge,
                 titleColor = titleColor,
                 paramsColor = paramsColor,
+                titleSizeMultiplier = adjustments.titleSizeMultiplier,
             )
         }
         drawWatermark(context, canvas, watermark, out.width, out.height, longEdge, color = 0x99000000.toInt())
@@ -70,9 +75,11 @@ data class SolidTemplate(
     override val displayName = "纯色"
 
     override fun render(
-        context: Context, source: Bitmap, exif: PhotoExif?, watermark: WatermarkSettings,
+        context: Context, source: Bitmap, exif: PhotoExif?,
+        watermark: WatermarkSettings, adjustments: TemplateAdjustments,
     ): Bitmap {
-        val out = matCanvas(source, marginPct, marginPct, marginPct, marginPct, borderColor)
+        val m = (marginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val out = matCanvas(source, m, m, m, m, borderColor)
         drawWatermark(
             context, Canvas(out), watermark,
             out.width, out.height, max(source.width, source.height),
@@ -97,14 +104,17 @@ data class BoldTemplate(
     override val displayName = "Bold"
 
     override fun render(
-        context: Context, source: Bitmap, exif: PhotoExif?, watermark: WatermarkSettings,
+        context: Context, source: Bitmap, exif: PhotoExif?,
+        watermark: WatermarkSettings, adjustments: TemplateAdjustments,
     ): Bitmap {
-        val out = matCanvas(source, sideMarginPct, sideMarginPct, sideMarginPct, bottomMarginPct, borderColor)
+        val side = (sideMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val bottom = (bottomMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val out = matCanvas(source, side, side, side, bottom, borderColor)
         val canvas = Canvas(out)
         val longEdge = max(source.width, source.height)
-        val sideMargin = (longEdge * sideMarginPct).toInt()
-        val bottomMargin = (longEdge * bottomMarginPct).toInt()
-        if (exif != null) {
+        val sideMargin = (longEdge * side).toInt()
+        val bottomMargin = (longEdge * bottom).toInt()
+        if (exif != null && adjustments.showCaption) {
             drawBoldCaption(
                 context, canvas, exif,
                 canvasWidth = out.width,
@@ -113,6 +123,7 @@ data class BoldTemplate(
                 longEdge = longEdge,
                 titleColor = titleColor,
                 paramsColor = paramsColor,
+                titleSizeMultiplier = adjustments.titleSizeMultiplier,
             )
         }
         drawWatermark(context, canvas, watermark, out.width, out.height, longEdge, color = 0x99FAFAFA.toInt())
@@ -121,7 +132,7 @@ data class BoldTemplate(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Minimal — hairline white border. No text.
+// Minimal — hairline white border.
 // ──────────────────────────────────────────────────────────────────────────
 data class MinimalTemplate(
     val borderColor: Int = 0xFFFAFAFA.toInt(),
@@ -132,9 +143,11 @@ data class MinimalTemplate(
     override val displayName = "Minimal"
 
     override fun render(
-        context: Context, source: Bitmap, exif: PhotoExif?, watermark: WatermarkSettings,
+        context: Context, source: Bitmap, exif: PhotoExif?,
+        watermark: WatermarkSettings, adjustments: TemplateAdjustments,
     ): Bitmap {
-        val out = matCanvas(source, marginPct, marginPct, marginPct, marginPct, borderColor)
+        val m = (marginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.0005f)
+        val out = matCanvas(source, m, m, m, m, borderColor)
         drawWatermark(
             context, Canvas(out), watermark,
             out.width, out.height, max(source.width, source.height),
@@ -145,7 +158,7 @@ data class MinimalTemplate(
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Polaroid — asymmetric. Wide bottom for handwritten title.
+// Polaroid — wide bottom for handwritten title.
 // ──────────────────────────────────────────────────────────────────────────
 data class PolaroidTemplate(
     val borderColor: Int = 0xFFFAF7F0.toInt(),
@@ -158,14 +171,17 @@ data class PolaroidTemplate(
     override val displayName = "Polaroid"
 
     override fun render(
-        context: Context, source: Bitmap, exif: PhotoExif?, watermark: WatermarkSettings,
+        context: Context, source: Bitmap, exif: PhotoExif?,
+        watermark: WatermarkSettings, adjustments: TemplateAdjustments,
     ): Bitmap {
-        val out = matCanvas(source, topSideMarginPct, topSideMarginPct, topSideMarginPct, bottomMarginPct, borderColor)
+        val top = (topSideMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val bottom = (bottomMarginPct * adjustments.borderWidthMultiplier).coerceAtLeast(0.001f)
+        val out = matCanvas(source, top, top, top, bottom, borderColor)
         val canvas = Canvas(out)
         val longEdge = max(source.width, source.height)
-        val topMargin = (longEdge * topSideMarginPct).toInt()
-        val bottomMargin = (longEdge * bottomMarginPct).toInt()
-        if (exif != null) {
+        val topMargin = (longEdge * top).toInt()
+        val bottomMargin = (longEdge * bottom).toInt()
+        if (exif != null && adjustments.showCaption) {
             drawPolaroidCaption(
                 context, canvas, exif,
                 canvasWidth = out.width,
@@ -173,6 +189,7 @@ data class PolaroidTemplate(
                 captionHeight = bottomMargin,
                 longEdge = longEdge,
                 titleColor = titleColor,
+                titleSizeMultiplier = adjustments.titleSizeMultiplier,
             )
         }
         drawWatermark(context, canvas, watermark, out.width, out.height, longEdge, color = 0x882A2520.toInt())
@@ -204,10 +221,10 @@ private fun matCanvas(
 private fun drawClassicCaption(
     context: Context, canvas: Canvas, exif: PhotoExif,
     canvasWidth: Int, captionTop: Int, captionHeight: Int, longEdge: Int,
-    titleColor: Int, paramsColor: Int,
+    titleColor: Int, paramsColor: Int, titleSizeMultiplier: Float,
 ) {
-    val titleSize = longEdge * 0.024f
-    val paramsSize = longEdge * 0.014f
+    val titleSize = longEdge * 0.024f * titleSizeMultiplier
+    val paramsSize = longEdge * 0.014f * titleSizeMultiplier
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
@@ -235,10 +252,10 @@ private fun drawClassicCaption(
 private fun drawBoldCaption(
     context: Context, canvas: Canvas, exif: PhotoExif,
     canvasWidth: Int, captionTop: Int, captionHeight: Int, longEdge: Int,
-    titleColor: Int, paramsColor: Int,
+    titleColor: Int, paramsColor: Int, titleSizeMultiplier: Float,
 ) {
-    val titleSize = longEdge * 0.038f
-    val paramsSize = longEdge * 0.016f
+    val titleSize = longEdge * 0.038f * titleSizeMultiplier
+    val paramsSize = longEdge * 0.016f * titleSizeMultiplier
 
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
@@ -266,9 +283,9 @@ private fun drawBoldCaption(
 private fun drawPolaroidCaption(
     context: Context, canvas: Canvas, exif: PhotoExif,
     canvasWidth: Int, captionTop: Int, captionHeight: Int, longEdge: Int,
-    titleColor: Int,
+    titleColor: Int, titleSizeMultiplier: Float,
 ) {
-    val titleSize = longEdge * 0.028f
+    val titleSize = longEdge * 0.028f * titleSizeMultiplier
     val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         color = titleColor
         typeface = Fonts.cormorantItalic(context)
@@ -285,11 +302,6 @@ private fun drawPolaroidCaption(
     if (title.isNotBlank()) canvas.drawText(title, cx, titleY, titlePaint)
 }
 
-/**
- * Right-aligned watermark in the bottom margin of the output. Pads ~2.2% in
- * from the right and bottom edges of the canvas so it sits inside the frame
- * area (never overlapping the photo proper).
- */
 private fun drawWatermark(
     context: Context,
     canvas: Canvas,
@@ -364,4 +376,6 @@ object FrameRenderer {
         MinimalTemplate(),
         PolaroidTemplate(),
     )
+
+    fun byId(id: String): FrameTemplate = all.firstOrNull { it.id == id } ?: all.first()
 }

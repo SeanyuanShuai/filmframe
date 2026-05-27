@@ -25,14 +25,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -61,10 +54,19 @@ import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.frame.FrameDetectionResult
 import com.seanyuan.filmframe.frame.FrameDetector
+import com.seanyuan.filmframe.frame.FrameInsets
+import com.seanyuan.filmframe.frame.FrameProcessor
 import com.seanyuan.filmframe.frame.FrameRenderer
 import com.seanyuan.filmframe.frame.FrameTemplate
 import com.seanyuan.filmframe.frame.ProcessedSource
-import com.seanyuan.filmframe.frame.FrameProcessor
+import com.seanyuan.filmframe.frame.TemplateAdjustments
+import com.seanyuan.filmframe.ui.common.ProcessingOverlay
+import com.seanyuan.filmframe.ui.common.ResultDialog
+import com.seanyuan.filmframe.ui.common.ResultSummary
+import com.seanyuan.filmframe.ui.glass.GlassButton
+import com.seanyuan.filmframe.ui.glass.GlassColors
+import com.seanyuan.filmframe.ui.glass.GlassSurface
+import com.seanyuan.filmframe.ui.params.TemplateParamsPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,31 +74,29 @@ import kotlinx.coroutines.withContext
 @Composable
 fun HomeScreen(
     onBatch: (List<Uri>) -> Unit,
+    onSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
 
-    val watermark by Settings.watermark(context)
-        .collectAsState(initial = WatermarkSettings.Default)
-    val lastTemplateId by Settings.lastTemplateId(context)
-        .collectAsState(initial = "classic")
-
-    var showSettings by remember { mutableStateOf(false) }
+    val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
+    val lastTemplateId by Settings.lastTemplateId(context).collectAsState(initial = "classic")
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var exif by remember { mutableStateOf<PhotoExif?>(null) }
     var frameResult by remember { mutableStateOf<FrameDetectionResult?>(null) }
     var rendered by remember { mutableStateOf<Bitmap?>(null) }
-    var pendingTemplate by remember { mutableStateOf<FrameTemplate?>(null) }
     var currentTemplate by remember { mutableStateOf<FrameTemplate?>(null) }
     var stripFrameChoice by remember { mutableStateOf(false) }
-    var rendering by remember { mutableStateOf(false) }
-    var exporting by remember { mutableStateOf(false) }
+    var adjustments by remember { mutableStateOf(TemplateAdjustments.Default) }
+    var pendingTemplate by remember { mutableStateOf<FrameTemplate?>(null) }
+    var showParams by remember { mutableStateOf(false) }
+    var processingMsg by remember { mutableStateOf<String?>(null) }
+    var resultSummary by remember { mutableStateOf<ResultSummary?>(null) }
 
-    val launcher = rememberLauncherForActivityResult(
+    val singleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri: Uri? ->
         if (uri != null) {
@@ -106,14 +106,15 @@ fun HomeScreen(
             sourceBitmap = null
             rendered = null
             currentTemplate = null
+            stripFrameChoice = false
+            adjustments = TemplateAdjustments.Default
+            showParams = false
         }
     }
 
     val multiLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)
-    ) { uris ->
-        if (uris.isNotEmpty()) onBatch(uris)
-    }
+    ) { uris -> if (uris.isNotEmpty()) onBatch(uris) }
 
     LaunchedEffect(selectedUri) {
         val uri = selectedUri ?: return@LaunchedEffect
@@ -121,20 +122,26 @@ fun HomeScreen(
             BitmapLoader.loadForAnalysis(context, uri, targetMaxDim = 1600)
         }
         sourceBitmap = bmp
-        frameResult = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
+        val detection = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
+        frameResult = detection
+
+        val defaultTemplate = FrameRenderer.byId(lastTemplateId)
+        if (detection?.hasFrame == true) {
+            pendingTemplate = defaultTemplate
+        } else {
+            currentTemplate = defaultTemplate
+            stripFrameChoice = false
+        }
     }
 
-    // Re-render preview when watermark changes
-    LaunchedEffect(watermark, currentTemplate) {
+    LaunchedEffect(watermark, currentTemplate, adjustments, stripFrameChoice, sourceBitmap) {
         val template = currentTemplate ?: return@LaunchedEffect
         val src = sourceBitmap ?: return@LaunchedEffect
-        val detected = frameResult
-        rendering = true
         val out = withContext(Dispatchers.Default) {
             val processed = ProcessedSource(
                 source = src,
                 exif = exif ?: PhotoExif(),
-                detection = detected ?: FrameDetectionResult(false, com.seanyuan.filmframe.frame.FrameInsets(0,0,0,0), 0, 0f),
+                detection = frameResult ?: FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), 0, 0f),
             )
             FrameProcessor.render(
                 context = context,
@@ -142,278 +149,359 @@ fun HomeScreen(
                 template = template,
                 stripExistingFrame = stripFrameChoice,
                 watermark = watermark,
+                adjustments = adjustments,
             )
         }
         rendered = out
-        rendering = false
     }
 
-    fun renderPreview(template: FrameTemplate, stripFrame: Boolean) {
-        val src = sourceBitmap ?: return
-        val detected = frameResult
-        rendering = true
+    fun pickTemplate(template: FrameTemplate) {
         currentTemplate = template
-        stripFrameChoice = stripFrame
         scope.launch { Settings.updateLastTemplate(context, template.id) }
-        scope.launch {
-            val out = withContext(Dispatchers.Default) {
-                val processed = ProcessedSource(
-                    source = src,
-                    exif = exif ?: PhotoExif(),
-                    detection = detected ?: FrameDetectionResult(false, com.seanyuan.filmframe.frame.FrameInsets(0,0,0,0), 0, 0f),
-                )
-                FrameProcessor.render(
-                    context = context,
-                    processed = processed,
-                    template = template,
-                    stripExistingFrame = stripFrame,
-                    watermark = watermark,
-                )
-            }
-            rendered = out
-            rendering = false
-        }
-    }
-
-    fun onTemplateTap(template: FrameTemplate) {
-        if (frameResult?.hasFrame == true && currentTemplate == null) {
-            pendingTemplate = template
-        } else {
-            renderPreview(template, stripFrame = stripFrameChoice && frameResult?.hasFrame == true)
-        }
     }
 
     fun exportFullRes() {
         val uri = selectedUri ?: return
         val template = currentTemplate ?: return
-        val stripFrame = stripFrameChoice
-        val currentWatermark = watermark
-        exporting = true
+        val w = watermark
+        val adj = adjustments
+        val strip = stripFrameChoice
+        processingMsg = "渲染并写入相册…"
         scope.launch {
-            val saved = withContext(Dispatchers.IO) {
+            val result = withContext(Dispatchers.IO) {
                 val full = FrameProcessor.loadFullForExport(context, uri) ?: return@withContext null
                 val out = FrameProcessor.render(
                     context = context,
                     processed = full,
                     template = template,
-                    stripExistingFrame = stripFrame,
-                    watermark = currentWatermark,
+                    stripExistingFrame = strip,
+                    watermark = w,
+                    adjustments = adj,
                 )
                 ImageExporter.saveToGallery(context, out, uri, full.loaded)
             }
-            exporting = false
-            val msg = when {
-                saved == null -> "导出失败，看 logcat"
-                saved.downsampled -> "已保存（实际 ${saved.outputWidth}px · 原图 ${saved.originalWidth}px，内存所限略缩）"
-                else -> "已保存到 Pictures/FilmFrame · ${saved.outputFormat} · ${saved.outputWidth}×${saved.outputHeight}"
-            }
-            snackbar.showSnackbar(msg)
-        }
-    }
-
-    if (showSettings) {
-        SettingsDialog(
-            initial = watermark,
-            onDismiss = { showSettings = false },
-            onSave = { newValue ->
-                showSettings = false
-                scope.launch { Settings.updateWatermark(context, newValue) }
-            },
-        )
-    }
-
-    pendingTemplate?.let { template ->
-        AlertDialog(
-            onDismissRequest = { pendingTemplate = null },
-            title = { Text("照片已带边框") },
-            text = {
-                Text("识别到这张照片已经有一圈现成边框（比如 OPPO HASSELBLAD、小米 Leica）。是否先移除再加 FilmFrame 自己的边框？")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    pendingTemplate = null
-                    renderPreview(template, stripFrame = true)
-                }) { Text("移除并重新加") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    pendingTemplate = null
-                    renderPreview(template, stripFrame = false)
-                }) { Text("保留直接套") }
-            },
-        )
-    }
-
-    Box(modifier = modifier.fillMaxSize()) {
-        Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            TopBar(
-                watermarkActive = watermark.active,
-                onSettings = { showSettings = true },
-            )
-
-            Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) {
-                val renderedBmp = rendered
-                val uri = selectedUri
-                when {
-                    renderedBmp != null -> Image(
-                        bitmap = renderedBmp.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    uri != null -> AsyncImage(
-                        model = uri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    else -> Text(
-                        text = "FilmFrame",
-                        color = Color.White,
-                        style = MaterialTheme.typography.headlineLarge,
-                    )
-                }
-            }
-
-            if (selectedUri != null && rendered == null) {
-                frameResult?.let { FrameDetectionBanner(it) }
-            }
-
-            if (selectedUri != null) {
-                TemplateChipRow(
-                    templates = FrameRenderer.all,
-                    selected = currentTemplate?.id,
-                    enabled = !rendering && sourceBitmap != null,
-                    onSelect = ::onTemplateTap,
+            processingMsg = null
+            if (result != null) {
+                resultSummary = ResultSummary(
+                    savedUri = result.uri,
+                    previewBitmap = rendered?.asImageBitmap(),
+                    outputFormat = result.outputFormat,
+                    outputWidth = result.outputWidth,
+                    outputHeight = result.outputHeight,
+                    originalWidth = result.originalWidth,
+                    originalHeight = result.originalHeight,
+                    downsampled = result.downsampled,
                 )
             }
+        }
+    }
 
-            BottomActions(
-                hasImage = selectedUri != null,
-                hasRendered = rendered != null,
-                rendering = rendering,
-                exporting = exporting,
-                onPick = {
-                    launcher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
+    Box(modifier = modifier.fillMaxSize().background(GlassColors.DeepBackground)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            HomeTopBar(
+                watermarkActive = watermark.active,
+                onSettings = onSettings,
+            )
+
+            if (selectedUri == null) {
+                LandingPanel(
+                    modifier = Modifier.weight(1f),
+                    onPickSingle = {
+                        singleLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onPickMulti = {
+                        multiLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                )
+            } else {
+                EditorPanel(
+                    modifier = Modifier.weight(1f),
+                    rendered = rendered,
+                    selectedUri = selectedUri,
+                    frameResult = frameResult,
+                    currentTemplate = currentTemplate,
+                    onSelectTemplate = ::pickTemplate,
+                    onPickAnother = {
+                        singleLauncher.launch(
+                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                        )
+                    },
+                    onToggleParams = { showParams = !showParams },
+                    onExport = ::exportFullRes,
+                    paramsOpen = showParams,
+                )
+            }
+        }
+
+        if (showParams && currentTemplate != null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                TemplateParamsPanel(
+                    template = currentTemplate!!,
+                    adjustments = adjustments,
+                    onChange = { adjustments = it },
+                    onClose = { showParams = false },
+                )
+            }
+        }
+
+        pendingTemplate?.let { template ->
+            AlertDialog(
+                onDismissRequest = { pendingTemplate = null },
+                title = { Text("照片已带边框") },
+                text = {
+                    Text("识别到这张照片已经有一圈现成边框（比如 OPPO HASSELBLAD、小米 Leica）。是否先移除再加 FilmFrame 自己的边框？")
                 },
-                onPickMulti = {
-                    multiLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingTemplate = null
+                        currentTemplate = template
+                        stripFrameChoice = true
+                        scope.launch { Settings.updateLastTemplate(context, template.id) }
+                    }) { Text("移除并重新加") }
                 },
-                onBackToOriginal = { rendered = null; currentTemplate = null },
-                onExport = { exportFullRes() },
+                dismissButton = {
+                    TextButton(onClick = {
+                        pendingTemplate = null
+                        currentTemplate = template
+                        stripFrameChoice = false
+                        scope.launch { Settings.updateLastTemplate(context, template.id) }
+                    }) { Text("保留直接套") }
+                },
+                containerColor = Color(0xFF1A1A1A),
+                titleContentColor = GlassColors.OnSurface,
+                textContentColor = GlassColors.OnSurfaceMuted,
             )
         }
 
-        SnackbarHost(
-            hostState = snackbar,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp),
-        ) { data -> Snackbar(snackbarData = data) }
+        processingMsg?.let {
+            ProcessingOverlay(title = "导出中", subtitle = it)
+        }
+
+        resultSummary?.let { summary ->
+            ResultDialog(
+                summary = summary,
+                onAnother = {
+                    resultSummary = null
+                    selectedUri = null
+                    rendered = null
+                    currentTemplate = null
+                    singleLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onDone = { resultSummary = null },
+            )
+        }
     }
 }
 
 @Composable
-private fun TopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
+private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(0xFF0E0E0E))
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             "FilmFrame",
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
+            color = GlassColors.OnSurface,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
         if (watermarkActive) {
-            Text(
-                "水印·开",
-                color = Color(0xFFD4A24A),
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(end = 12.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(GlassColors.AccentSoft)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "水印 · 开",
+                    color = GlassColors.Accent,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
         }
-        TextButton(onClick = onSettings) { Text("设置") }
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .clickable(onClick = onSettings)
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        ) {
+            Text("设置", color = GlassColors.OnSurface, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
 
 @Composable
-private fun SettingsDialog(
-    initial: WatermarkSettings,
-    onDismiss: () -> Unit,
-    onSave: (WatermarkSettings) -> Unit,
+private fun LandingPanel(
+    modifier: Modifier = Modifier,
+    onPickSingle: () -> Unit,
+    onPickMulti: () -> Unit,
 ) {
-    var enabled by remember(initial) { mutableStateOf(initial.enabled) }
-    var text by remember(initial) { mutableStateOf(initial.text) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("设置") },
-        text = {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("水印", modifier = Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                }
-                if (enabled) {
-                    Spacer(Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("水印文字") },
-                        placeholder = { Text("例：© Sean Yuan") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "渲染在每张图右下角，字体 Cormorant Italic。",
-                        color = Color(0xFF888888),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(WatermarkSettings(enabled, text.trim())) }) {
-                Text("保存")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
-        },
-    )
+    Box(
+        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                "为你的照片加上",
+                color = GlassColors.OnSurfaceMuted,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Gallery 级的边框",
+                color = GlassColors.OnSurface,
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "本地处理 · EXIF 自动识别 · 5 个内置模板",
+                color = GlassColors.OnSurfaceFaint,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Spacer(Modifier.height(40.dp))
+            GlassButton(
+                text = "选一张照片",
+                accent = true,
+                onClick = onPickSingle,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            GlassButton(
+                text = "批处理多张",
+                onClick = onPickMulti,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
 }
 
 @Composable
-private fun TemplateChipRow(
-    templates: List<FrameTemplate>,
-    selected: String?,
-    enabled: Boolean,
-    onSelect: (FrameTemplate) -> Unit,
+private fun EditorPanel(
+    modifier: Modifier = Modifier,
+    rendered: Bitmap?,
+    selectedUri: Uri?,
+    frameResult: FrameDetectionResult?,
+    currentTemplate: FrameTemplate?,
+    onSelectTemplate: (FrameTemplate) -> Unit,
+    onPickAnother: () -> Unit,
+    onToggleParams: () -> Unit,
+    onExport: () -> Unit,
+    paramsOpen: Boolean,
 ) {
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF0E0E0E))
-            .padding(vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp),
-    ) {
-        items(templates) { template ->
-            TemplateChip(
-                template = template,
-                selected = template.id == selected,
-                enabled = enabled,
-                onClick = { onSelect(template) },
+    Column(modifier = modifier.fillMaxSize()) {
+        // Image preview
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            GlassSurface(
+                modifier = Modifier.fillMaxSize(),
+                tonalIntensity = 0.6f,
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    when {
+                        rendered != null -> Image(
+                            bitmap = rendered.asImageBitmap(),
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        selectedUri != null -> AsyncImage(
+                            model = selectedUri,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+            }
+        }
+
+        frameResult?.takeIf { it.hasFrame }?.let { fr ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(GlassColors.Accent),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "原图已有边框 · 自动移除 · 置信度 ${(fr.confidence * 100).toInt()}%",
+                    color = GlassColors.OnSurfaceMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        // Template chips
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp),
+        ) {
+            items(FrameRenderer.all) { template ->
+                TemplateChip(
+                    template = template,
+                    selected = currentTemplate?.id == template.id,
+                    onClick = { onSelectTemplate(template) },
+                )
+            }
+        }
+
+        // Bottom action row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            GlassButton(
+                text = "换一张",
+                onClick = onPickAnother,
+                modifier = Modifier.weight(1f),
+            )
+            GlassButton(
+                text = if (paramsOpen) "收起调整" else "调整",
+                onClick = onToggleParams,
+                modifier = Modifier.weight(1f),
+                enabled = currentTemplate != null,
+            )
+            GlassButton(
+                text = "保存",
+                onClick = onExport,
+                modifier = Modifier.weight(1f),
+                accent = true,
+                enabled = currentTemplate != null,
             )
         }
     }
@@ -423,119 +511,28 @@ private fun TemplateChipRow(
 private fun TemplateChip(
     template: FrameTemplate,
     selected: Boolean,
-    enabled: Boolean,
     onClick: () -> Unit,
 ) {
-    val border = if (selected) Color(0xFFD4A24A) else Color(0xFF333333)
-    val bg = if (selected) Color(0xFF2A1F0F) else Color(0xFF1A1A1A)
-    val textColor = if (enabled) Color.White else Color(0xFF666666)
-
+    val border = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.12f)
+    val bg = if (selected) GlassColors.AccentSoft else Color.White.copy(alpha = 0.04f)
+    val textColor = if (selected) GlassColors.Accent else GlassColors.OnSurface
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(bg)
-            .border(1.dp, border, RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled, onClick = onClick)
+            .border(
+                if (selected) 1.2.dp else 0.5.dp,
+                border,
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {
         Text(
-            text = template.displayName,
+            template.displayName,
             color = textColor,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
-    }
-}
-
-@Composable
-private fun BottomActions(
-    hasImage: Boolean,
-    hasRendered: Boolean,
-    rendering: Boolean,
-    exporting: Boolean,
-    onPick: () -> Unit,
-    onPickMulti: () -> Unit,
-    onBackToOriginal: () -> Unit,
-    onExport: () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        if (!hasImage) {
-            Button(onClick = onPick, modifier = Modifier.fillMaxWidth()) {
-                Text("导入照片")
-            }
-            Spacer(Modifier.height(10.dp))
-            OutlinedButton(onClick = onPickMulti, modifier = Modifier.fillMaxWidth()) {
-                Text("批处理多张")
-            }
-            return@Column
-        }
-
-        Row {
-            OutlinedButton(
-                onClick = if (hasRendered) onBackToOriginal else onPick,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (hasRendered) "返回原图" else "换一张")
-            }
-            if (hasRendered) {
-                Spacer(Modifier.width(12.dp))
-                Button(
-                    onClick = onExport,
-                    enabled = !exporting,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (exporting) "导出中…" else "保存到相册")
-                }
-            }
-        }
-        if (rendering) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "渲染中…",
-                color = Color(0xFFAAAAAA),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-    }
-}
-
-@Composable
-private fun FrameDetectionBanner(result: FrameDetectionResult) {
-    val bg = if (result.hasFrame) Color(0xFF2A1F0F) else Color(0xFF0F1F1A)
-    val accent = if (result.hasFrame) Color(0xFFD4A24A) else Color(0xFF5BBF8F)
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(bg)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(RoundedCornerShape(4.dp))
-                .background(accent),
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = if (result.hasFrame) {
-                "已识别到既有边框 · ${if (result.isBottomHeavy) "底部加高" else "等宽"} · ${(result.confidence * 100).toInt()}%"
-            } else {
-                "未检测到既有边框"
-            },
-            color = Color.White,
-            fontWeight = FontWeight.Medium,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.weight(1f),
-        )
-        if (result.hasFrame) {
-            Box(
-                modifier = Modifier
-                    .size(20.dp)
-                    .border(1.dp, Color(0xFF555555), RoundedCornerShape(4.dp))
-                    .background(Color(result.frameColor)),
-            )
-        }
     }
 }
