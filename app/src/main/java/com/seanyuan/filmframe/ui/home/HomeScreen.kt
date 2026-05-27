@@ -8,6 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +20,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -49,12 +53,10 @@ import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
 import com.seanyuan.filmframe.data.ImageExporter
 import com.seanyuan.filmframe.data.PhotoExif
-import com.seanyuan.filmframe.frame.ClassicTemplate
 import com.seanyuan.filmframe.frame.FrameDetectionResult
 import com.seanyuan.filmframe.frame.FrameDetector
 import com.seanyuan.filmframe.frame.FrameRenderer
 import com.seanyuan.filmframe.frame.FrameTemplate
-import com.seanyuan.filmframe.frame.SolidTemplate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -111,7 +113,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 } else {
                     src
                 }
-                template.render(base, exif)
+                template.render(context, base, exif)
             }
             rendered = out
             rendering = false
@@ -119,10 +121,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     }
 
     fun onTemplateTap(template: FrameTemplate) {
-        if (frameResult?.hasFrame == true) {
+        if (frameResult?.hasFrame == true && currentTemplate == null) {
             pendingTemplate = template
         } else {
-            renderPreview(template, stripFrame = false)
+            renderPreview(template, stripFrame = stripFrameChoice && frameResult?.hasFrame == true)
         }
     }
 
@@ -144,7 +146,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 } else {
                     fullSrc
                 }
-                val out = template.render(baseSrc, exif)
+                val out = template.render(context, baseSrc, exif)
                 ImageExporter.saveToGallery(context, out)
             }
             exporting = false
@@ -205,9 +207,17 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 }
             }
 
-            if (rendered == null) {
+            if (selectedUri != null && rendered == null) {
                 frameResult?.let { FrameDetectionBanner(it) }
-                exif?.let { ExifDebugPanel(it) }
+            }
+
+            if (selectedUri != null) {
+                TemplateChipRow(
+                    templates = FrameRenderer.all,
+                    selected = currentTemplate?.id,
+                    enabled = !rendering && sourceBitmap != null,
+                    onSelect = ::onTemplateTap,
+                )
             }
 
             BottomActions(
@@ -220,8 +230,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                     )
                 },
-                onBackToOriginal = { rendered = null },
-                onApply = { template -> onTemplateTap(template) },
+                onBackToOriginal = { rendered = null; currentTemplate = null },
                 onExport = { exportFullRes() },
             )
         }
@@ -234,6 +243,60 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun TemplateChipRow(
+    templates: List<FrameTemplate>,
+    selected: String?,
+    enabled: Boolean,
+    onSelect: (FrameTemplate) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0E0E0E))
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+    ) {
+        items(templates) { template ->
+            TemplateChip(
+                template = template,
+                selected = template.id == selected,
+                enabled = enabled,
+                onClick = { onSelect(template) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun TemplateChip(
+    template: FrameTemplate,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val border = if (selected) Color(0xFFD4A24A) else Color(0xFF333333)
+    val bg = if (selected) Color(0xFF2A1F0F) else Color(0xFF1A1A1A)
+    val textColor = if (enabled) Color.White else Color(0xFF666666)
+
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+    ) {
+        Text(
+            text = template.displayName,
+            color = textColor,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
 private fun BottomActions(
     hasImage: Boolean,
     hasRendered: Boolean,
@@ -241,7 +304,6 @@ private fun BottomActions(
     exporting: Boolean,
     onPick: () -> Unit,
     onBackToOriginal: () -> Unit,
-    onApply: (FrameTemplate) -> Unit,
     onExport: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
@@ -252,11 +314,14 @@ private fun BottomActions(
             return@Column
         }
 
-        if (hasRendered) {
-            Row {
-                OutlinedButton(onClick = onBackToOriginal, modifier = Modifier.weight(1f)) {
-                    Text("返回原图")
-                }
+        Row {
+            OutlinedButton(
+                onClick = if (hasRendered) onBackToOriginal else onPick,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(if (hasRendered) "返回原图" else "换一张")
+            }
+            if (hasRendered) {
                 Spacer(Modifier.width(12.dp))
                 Button(
                     onClick = onExport,
@@ -266,32 +331,14 @@ private fun BottomActions(
                     Text(if (exporting) "导出中…" else "保存到相册")
                 }
             }
-            return@Column
         }
-
-        // Has image, not rendered yet — show template options
-        Row {
-            OutlinedButton(onClick = onPick, modifier = Modifier.weight(1f)) {
-                Text("换一张")
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Row {
-            Button(
-                onClick = { onApply(ClassicTemplate()) },
-                enabled = !rendering,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (rendering) "渲染中…" else "Classic")
-            }
-            Spacer(Modifier.width(12.dp))
-            Button(
-                onClick = { onApply(SolidTemplate()) },
-                enabled = !rendering,
-                modifier = Modifier.weight(1f),
-            ) {
-                Text(if (rendering) "渲染中…" else "纯色")
-            }
+        if (rendering) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "渲染中…",
+                color = Color(0xFFAAAAAA),
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }
@@ -305,87 +352,34 @@ private fun FrameDetectionBanner(result: FrameDetectionResult) {
         modifier = Modifier
             .fillMaxWidth()
             .background(bg)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
-                .clip(RoundedCornerShape(5.dp))
+                .size(8.dp)
+                .clip(RoundedCornerShape(4.dp))
                 .background(accent),
         )
-        Spacer(Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = if (result.hasFrame) "已识别到既有边框" else "未检测到既有边框",
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (result.hasFrame) {
-                val ins = result.insets
-                Text(
-                    text = "边距 ${ins.top}·${ins.bottom}·${ins.left}·${ins.right}px · " +
-                        if (result.isBottomHeavy) "底部加高（含 EXIF 文字概率高）" else "等宽边框",
-                    color = Color(0xFFAAAAAA),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Text(
-                    text = "置信度 ${(result.confidence * 100).toInt()}%",
-                    color = Color(0xFF888888),
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = if (result.hasFrame) {
+                "已识别到既有边框 · ${if (result.isBottomHeavy) "底部加高" else "等宽"} · ${(result.confidence * 100).toInt()}%"
+            } else {
+                "未检测到既有边框"
+            },
+            color = Color.White,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
         if (result.hasFrame) {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(20.dp)
                     .border(1.dp, Color(0xFF555555), RoundedCornerShape(4.dp))
                     .background(Color(result.frameColor)),
             )
         }
-    }
-}
-
-@Composable
-private fun ExifDebugPanel(exif: PhotoExif) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1A1A1A))
-            .padding(12.dp),
-    ) {
-        ExifRow("机身", formatBody(exif.cameraMake, exif.cameraModel))
-        ExifRow("镜头", exif.lensModel)
-        ExifRow("焦距", exif.focalLength)
-        ExifRow("光圈", exif.aperture)
-        ExifRow("快门", exif.shutterSpeed)
-        ExifRow("ISO", exif.iso)
-    }
-}
-
-private fun formatBody(make: String?, model: String?): String? {
-    if (make.isNullOrBlank()) return model
-    if (model.isNullOrBlank()) return make
-    return if (model.startsWith(make, ignoreCase = true)) model else "$make $model"
-}
-
-@Composable
-private fun ExifRow(label: String, value: String?) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-    ) {
-        Text(
-            text = label,
-            color = Color(0xFF888888),
-            modifier = Modifier.width(56.dp),
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Text(
-            text = value?.takeIf { it.isNotBlank() } ?: "N/A",
-            color = Color.White,
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }

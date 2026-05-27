@@ -19,8 +19,21 @@ object BitmapLoader {
      * For export: load at up to 4096px on long edge. Caps high enough for print
      * and 4K screens while bounding memory (50MP raw would blow up the bitmap).
      */
-    fun loadForExport(context: Context, uri: Uri, targetMaxDim: Int = 4096): Bitmap? =
-        loadSampled(context, uri, targetMaxDim)
+    /**
+     * For export: try full resolution, fall back to ever-smaller caps if memory
+     * doesn't permit. 8192 covers up to ~50 MP cleanly; 4096 is the safety net.
+     */
+    fun loadForExport(context: Context, uri: Uri): Bitmap? {
+        for (cap in intArrayOf(Int.MAX_VALUE, 8192, 6144, 4096)) {
+            try {
+                val bmp = loadSampled(context, uri, cap)
+                if (bmp != null) return bmp
+            } catch (_: OutOfMemoryError) {
+                // try a smaller cap
+            }
+        }
+        return null
+    }
 
     private fun loadSampled(context: Context, uri: Uri, targetMaxDim: Int): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
