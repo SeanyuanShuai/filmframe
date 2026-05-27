@@ -1,45 +1,68 @@
 # 明天接着干 / Resume Pointer
 
-> 最后一次更新：2026-05-25 晚
+> 最后一次更新：2026-05-27 晚
 
-## ✅ 已经做完的（v0.1 大致 Day 1-3）
+## ✅ 当前进度（一周冲刺）
 
-- **Day 1**：Photo Picker（系统相册，无需权限）+ EXIF 读取（6 字段）+ Make/Model 去重
-- **Day 2**：FrameDetector 边框检测算法（4 角采样 + 沿边扫描，85% 匹配率 + 3 行容差）+ De-frame 裁切
-- **Day 2.5**：ClassicTemplate 渲染器（Magnum 风：5% 边、14% 底、italic serif + small caps + 0.18em 字距）
-- **Day 3**：SolidTemplate 纯色模板（7% 等边、无文字）+ ImageExporter（MediaStore，写 Pictures/FilmFrame/，JPEG 95，最大 4096px）
+**v0.1 主流程 + UX v2 完成**：
 
-## ⏭️ 明天的下一步（按顺序）
+- **Day 1-3**：Photo Picker + EXIF + Classic 模板 + 导出
+- **Day 4**：5 模板 + 字体（Cormorant Garamond / DM Serif Display / Inter，全 OFL 商用）
+- **Day 5**：批处理多选 + 每图独立模板预览
+- **Day 6**：PNG/JPEG/WebP 格式跟随源 + 水印 + 设置
+- **P0 + P1**：EXIF 旋转修复 + 持久化上次模板 + 降采样提示 + EXIF metadata 保留 + 水印 4 角 + 模板参数微调 + App 图标
+- **新设置**：画质 4 档 + 自动去除原边框 toggle
+- **UX v2**（今天大改）：WindowInsets 兼容 + iOS 26 Liquid Glass + 完整动画 + Gallery 沉浸式 ResultScreen + 自建 MediaStore picker
 
-1. **质量校准**（不写代码，先看）：把今天导出的图拖到 Mac 大屏，确认 Classic 模板设计感是否到 Magnum 标准
-   - 如果字太小/太大 → 改 `ClassicTemplate.titleSize` 系数（当前 `longEdge * 0.020f`）
-   - 如果版心比例不对 → 改 `sideMarginPct` / `bottomMarginPct`
-   - **lock 视觉质量再上 Bold/Minimal**，不要边扩边调
+最新 commit：`fb88c7e feat(picker): custom MediaStore gallery picker with big thumbnails`
 
-2. **Day 4 - Bold 模板**（`app/src/main/java/com/seanyuan/filmframe/frame/FrameRenderer.kt`）
-   - 全黑宽边 + 底部居中两行 serif：大字相机名 + 小字参数
-   - 参考富士机身底部水印那种排版
+## ⏭️ 明天的下一步候选（按你昨天提到的 + dogfood 反馈定）
 
-3. **Day 4 - Minimal 模板**
-   - 极窄白边（长边 1-2%），无文字
-   - 跟 Solid 的区别：Solid 是"框"，Minimal 是"线"
+### 实测优先级（先测今天的 5 大改造，看哪个反馈最差就先修）
+1. **状态栏 / 顶栏兼容** — 各机型测
+2. **Picker 2 列大缩略图** — 是否够清晰
+3. **路由动画 + 玻璃质感** — 是否够 iOS 26 范儿
+4. **Gallery 结果页沉浸感** — 点照片 chrome toggle
+5. **5 个模板 + 参数面板** — 视觉质量到没到 Magnum
 
-4. **Day 5 - 一产出多模板**
-   - 把现在的"两个按钮" UX 升级成横向滑动 3 卡片预览
-   - 用户挑一张选中再进参数微调
-   - 这是 wedge 的关键 UX，要打磨
+### 还能雕的细节（按需挑）
+- 长按 Picker 缩略图 → 全屏预览大图再选
+- ResultScreen 左右滑切换最近 5 张已保存图
+- Polaroid 模板字体/比例再调
+- Onboarding 三步首启介绍
+- shared element transition（标题文字飞跃式跨页）
+- v0.1 tag + 构建 release APK 给自己用
 
-5. **Day 6 - 批处理 + 持久化**
-   - 多选导入（已经支持 `PickMultipleVisualMedia`）
-   - 单模板套用 N 张图 + 进度条
-   - DataStore 存上次用过的模板
+## 🗂 当前架构（明天接手用）
 
-## 💡 如果重新打开 Claude Code 想接着干，第一句这样说
+```
+ui/
+├── theme/                    Compose theme (FilmFrameTheme)
+├── glass/Glass.kt            Liquid Glass v2 primitives (Surface / Button)
+├── home/HomeScreen.kt        Landing + Editor (Crossfade 二态)
+├── picker/PhotoPickerScreen  自建 MediaStore picker，单/多选模式
+├── batch/BatchScreen.kt      多图批处理 + 每图模板预览
+├── settings/SettingsScreen.kt 画质 / 原图处理 / 水印 / 关于 4 section
+├── params/TemplateParamsSheet.kt 边框宽度 / 字号 / EXIF 字段开关
+├── common/ProcessingOverlay.kt 全屏渲染中 modal
+└── result/ResultScreen.kt    Gallery 沉浸式结果页 + 模糊背板 + chrome toggle
 
-> 我是 FilmFrame 项目的作者。看 `~/filmframe/NEXT.md` 了解进度。
-> 我现在想做 [Day 4 Bold 模板 / Day 5 多模板预览 / 别的]。
+frame/
+├── FrameTemplate (interface) + 5 实现（Classic/Bold/Solid/Minimal/Polaroid）
+├── FrameRenderer             matCanvas 工具 + 水印绘制
+├── FrameDetector             边框检测算法（4 角 + 沿边扫描）
+├── FrameProcessor            统一 load/detect/render pipeline
+├── Fonts                     懒加载 Typeface（Cormorant/DM Serif/Inter）
+└── TemplateAdjustments       borderWidthMult / titleSizeMult / showCaption
 
-Claude 会自动读这个文件 + git log + 当前代码状态，就接上了。
+data/
+├── BitmapLoader              + EXIF 旋转 + 内存自适应降采样
+├── ExifReader                6 字段读取 + rational 解析
+├── ImageExporter             4 档画质 + 格式跟随 + EXIF 复制
+├── MediaGallery              MediaStore 相册查询
+├── PhotoExif (data class)
+└── Settings                  DataStore: 水印 + 上次模板 + 画质 + 自动去边框
+```
 
 ## 🔧 速查
 
@@ -54,6 +77,22 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 # 截手机屏
 ~/Library/Android/sdk/platform-tools/adb exec-out screencap -p > /tmp/screen.png
+
+# 卸载重装（刷新桌面图标缓存等）
+~/Library/Android/sdk/platform-tools/adb uninstall com.seanyuan.filmframe
 ```
+
+## 💡 重新打开 Claude Code 接手
+
+```bash
+cd ~/filmframe
+claude
+```
+
+第一句：
+
+> 看 `NEXT.md`，今天测了 UX v2 改造，[反馈]。我想 [继续雕 / 进 v0.1 release / 别的]。
+
+Claude 通过 memory 认识这个项目，读 NEXT.md + git log + 当前代码自动接续。
 
 仓库：https://github.com/SeanyuanShuai/filmframe
