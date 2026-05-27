@@ -14,19 +14,19 @@ import java.util.Locale
 object ImageExporter {
 
     private const val SUBFOLDER = "FilmFrame"
-    private const val JPEG_QUALITY = 95
 
     /**
-     * Saves the given bitmap as a JPEG into Pictures/FilmFrame/ via MediaStore.
-     * Returns the content Uri on success, null on failure.
+     * Saves bitmap as PNG to Pictures/FilmFrame/. PNG is truly lossless (no
+     * JPEG-style 8×8 block transform), at the cost of larger file size
+     * (~5-10× JPEG quality 95 for typical photos).
      */
     fun saveToGallery(context: Context, bitmap: Bitmap): Uri? {
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val filename = "FilmFrame_$timestamp.jpg"
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
+        val filename = "FilmFrame_$timestamp.png"
 
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(
                     MediaStore.Images.Media.RELATIVE_PATH,
@@ -42,8 +42,9 @@ object ImageExporter {
 
         return try {
             resolver.openOutputStream(uri)?.use { out ->
-                if (!bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)) {
-                    throw IllegalStateException("bitmap compress failed")
+                // PNG compress() ignores the quality int — always lossless.
+                if (!bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)) {
+                    throw IllegalStateException("bitmap compress (PNG) failed")
                 }
             } ?: throw IllegalStateException("openOutputStream returned null")
 

@@ -6,6 +6,7 @@ import android.net.Uri
 import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
 import com.seanyuan.filmframe.data.PhotoExif
+import com.seanyuan.filmframe.data.WatermarkSettings
 
 /**
  * Bundle of analysis outputs for one source image.
@@ -42,12 +43,13 @@ object FrameProcessor {
         processed: ProcessedSource,
         template: FrameTemplate,
         stripExistingFrame: Boolean,
+        watermark: WatermarkSettings = WatermarkSettings.Default,
     ): Bitmap {
         val base = if (stripExistingFrame && processed.detection.hasFrame) {
             FrameRenderer.deframe(processed.source, processed.detection.insets)
         } else {
             processed.source
         }
-        return template.render(context, base, processed.exif)
+        return template.render(context, base, processed.exif, watermark)
     }
 }

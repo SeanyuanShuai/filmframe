@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,13 +28,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,10 +57,14 @@ import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
 import com.seanyuan.filmframe.data.ImageExporter
 import com.seanyuan.filmframe.data.PhotoExif
+import com.seanyuan.filmframe.data.Settings
+import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.frame.FrameDetectionResult
 import com.seanyuan.filmframe.frame.FrameDetector
 import com.seanyuan.filmframe.frame.FrameRenderer
 import com.seanyuan.filmframe.frame.FrameTemplate
+import com.seanyuan.filmframe.frame.ProcessedSource
+import com.seanyuan.filmframe.frame.FrameProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,6 +77,11 @@ fun HomeScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+
+    val watermark by Settings.watermark(context)
+        .collectAsState(initial = WatermarkSettings.Default)
+
+    var showSettings by remember { mutableStateOf(false) }
 
     var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var sourceBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -109,6 +122,30 @@ fun HomeScreen(
         frameResult = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
     }
 
+    // Re-render preview when watermark changes
+    LaunchedEffect(watermark, currentTemplate) {
+        val template = currentTemplate ?: return@LaunchedEffect
+        val src = sourceBitmap ?: return@LaunchedEffect
+        val detected = frameResult
+        rendering = true
+        val out = withContext(Dispatchers.Default) {
+            val processed = ProcessedSource(
+                source = src,
+                exif = exif ?: PhotoExif(),
+                detection = detected ?: FrameDetectionResult(false, com.seanyuan.filmframe.frame.FrameInsets(0,0,0,0), 0, 0f),
+            )
+            FrameProcessor.render(
+                context = context,
+                processed = processed,
+                template = template,
+                stripExistingFrame = stripFrameChoice,
+                watermark = watermark,
+            )
+        }
+        rendered = out
+        rendering = false
+    }
+
     fun renderPreview(template: FrameTemplate, stripFrame: Boolean) {
         val src = sourceBitmap ?: return
         val detected = frameResult
@@ -117,12 +154,18 @@ fun HomeScreen(
         stripFrameChoice = stripFrame
         scope.launch {
             val out = withContext(Dispatchers.Default) {
-                val base = if (stripFrame && detected?.hasFrame == true) {
-                    FrameRenderer.deframe(src, detected.insets)
-                } else {
-                    src
-                }
-                template.render(context, base, exif)
+                val processed = ProcessedSource(
+                    source = src,
+                    exif = exif ?: PhotoExif(),
+                    detection = detected ?: FrameDetectionResult(false, com.seanyuan.filmframe.frame.FrameInsets(0,0,0,0), 0, 0f),
+                )
+                FrameProcessor.render(
+                    context = context,
+                    processed = processed,
+                    template = template,
+                    stripExistingFrame = stripFrame,
+                    watermark = watermark,
+                )
             }
             rendered = out
             rendering = false
@@ -141,28 +184,36 @@ fun HomeScreen(
         val uri = selectedUri ?: return
         val template = currentTemplate ?: return
         val stripFrame = stripFrameChoice
+        val currentWatermark = watermark
         exporting = true
         scope.launch {
             val saved = withContext(Dispatchers.IO) {
-                val fullSrc = BitmapLoader.loadForExport(context, uri) ?: return@withContext null
-                val baseSrc = if (stripFrame) {
-                    val fullScale = FrameDetector.detect(fullSrc)
-                    if (fullScale.hasFrame) {
-                        FrameRenderer.deframe(fullSrc, fullScale.insets)
-                    } else {
-                        fullSrc
-                    }
-                } else {
-                    fullSrc
-                }
-                val out = template.render(context, baseSrc, exif)
+                val full = FrameProcessor.loadFullForExport(context, uri) ?: return@withContext null
+                val out = FrameProcessor.render(
+                    context = context,
+                    processed = full,
+                    template = template,
+                    stripExistingFrame = stripFrame,
+                    watermark = currentWatermark,
+                )
                 ImageExporter.saveToGallery(context, out)
             }
             exporting = false
             snackbar.showSnackbar(
-                if (saved != null) "已保存到 相册 / Pictures / FilmFrame" else "导出失败，看 logcat"
+                if (saved != null) "已保存 PNG 无损图到 Pictures/FilmFrame/" else "导出失败，看 logcat"
             )
         }
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            initial = watermark,
+            onDismiss = { showSettings = false },
+            onSave = { newValue ->
+                showSettings = false
+                scope.launch { Settings.updateWatermark(context, newValue) }
+            },
+        )
     }
 
     pendingTemplate?.let { template ->
@@ -189,6 +240,11 @@ fun HomeScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+            TopBar(
+                watermarkActive = watermark.active,
+                onSettings = { showSettings = true },
+            )
+
             Box(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentAlignment = Alignment.Center,
@@ -257,6 +313,81 @@ fun HomeScreen(
 }
 
 @Composable
+private fun TopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0E0E0E))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "FilmFrame",
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
+        )
+        if (watermarkActive) {
+            Text(
+                "水印·开",
+                color = Color(0xFFD4A24A),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(end = 12.dp),
+            )
+        }
+        TextButton(onClick = onSettings) { Text("设置") }
+    }
+}
+
+@Composable
+private fun SettingsDialog(
+    initial: WatermarkSettings,
+    onDismiss: () -> Unit,
+    onSave: (WatermarkSettings) -> Unit,
+) {
+    var enabled by remember(initial) { mutableStateOf(initial.enabled) }
+    var text by remember(initial) { mutableStateOf(initial.text) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("设置") },
+        text = {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("水印", modifier = Modifier.weight(1f))
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                }
+                if (enabled) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("水印文字") },
+                        placeholder = { Text("例：© Sean Yuan") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "渲染在每张图右下角，字体 Cormorant Italic。",
+                        color = Color(0xFF888888),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(WatermarkSettings(enabled, text.trim())) }) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+@Composable
 private fun TemplateChipRow(
     templates: List<FrameTemplate>,
     selected: String?,
@@ -269,7 +400,7 @@ private fun TemplateChipRow(
             .background(Color(0xFF0E0E0E))
             .padding(vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp),
     ) {
         items(templates) { template ->
             TemplateChip(

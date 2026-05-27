@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -52,6 +53,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.seanyuan.filmframe.data.ImageExporter
+import com.seanyuan.filmframe.data.Settings
+import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.frame.FrameProcessor
 import com.seanyuan.filmframe.frame.FrameRenderer
 import com.seanyuan.filmframe.frame.FrameTemplate
@@ -74,6 +77,7 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = remember { SnackbarHostState() }
+    val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
 
     val items = remember(uris) {
         mutableStateListOf<BatchItem>().apply { addAll(uris.map { BatchItem(it) }) }
@@ -90,6 +94,7 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                     template.id to FrameProcessor.render(
                         context, processed, template,
                         stripExistingFrame = processed.detection.hasFrame,
+                        watermark = watermark,
                     )
                 }
                 items[idx] = items[idx].copy(
@@ -143,7 +148,10 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                                 val full = FrameProcessor.loadFullForExport(context, item.uri)
                                     ?: return@withContext false
                                 val template = FrameRenderer.all.first { it.id == item.selectedTemplateId }
-                                val rendered = FrameProcessor.render(context, full, template, item.stripFrame)
+                                val rendered = FrameProcessor.render(
+                                    context, full, template, item.stripFrame,
+                                    watermark = watermark,
+                                )
                                 ImageExporter.saveToGallery(context, rendered) != null
                             }
                             if (ok) successCount++
