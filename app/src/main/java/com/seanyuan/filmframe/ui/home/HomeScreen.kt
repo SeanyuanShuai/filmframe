@@ -5,6 +5,17 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,16 +29,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -48,8 +59,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.seanyuan.filmframe.data.BitmapLoader
 import com.seanyuan.filmframe.data.ExifReader
-import com.seanyuan.filmframe.data.ImageExporter
 import com.seanyuan.filmframe.data.ExportQuality
+import com.seanyuan.filmframe.data.ImageExporter
 import com.seanyuan.filmframe.data.PhotoExif
 import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkSettings
@@ -62,12 +73,11 @@ import com.seanyuan.filmframe.frame.FrameTemplate
 import com.seanyuan.filmframe.frame.ProcessedSource
 import com.seanyuan.filmframe.frame.TemplateAdjustments
 import com.seanyuan.filmframe.ui.common.ProcessingOverlay
-import com.seanyuan.filmframe.ui.common.ResultDialog
-import com.seanyuan.filmframe.ui.common.ResultSummary
 import com.seanyuan.filmframe.ui.glass.GlassButton
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.glass.GlassSurface
 import com.seanyuan.filmframe.ui.params.TemplateParamsPanel
+import com.seanyuan.filmframe.ui.result.ResultSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -76,6 +86,7 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     onBatch: (List<Uri>) -> Unit,
     onSettings: () -> Unit,
+    onResult: (ResultSummary) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -95,8 +106,7 @@ fun HomeScreen(
     var stripFrameChoice by remember { mutableStateOf(false) }
     var adjustments by remember { mutableStateOf(TemplateAdjustments.Default) }
     var showParams by remember { mutableStateOf(false) }
-    var processingMsg by remember { mutableStateOf<String?>(null) }
-    var resultSummary by remember { mutableStateOf<ResultSummary?>(null) }
+    var processing by remember { mutableStateOf(false) }
 
     val singleLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -126,7 +136,6 @@ fun HomeScreen(
         sourceBitmap = bmp
         val detection = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
         frameResult = detection
-
         currentTemplate = FrameRenderer.byId(lastTemplateId)
         stripFrameChoice = detection?.hasFrame == true && autoRemoveExistingFrame
     }
@@ -164,7 +173,7 @@ fun HomeScreen(
         val adj = adjustments
         val strip = stripFrameChoice
         val q = exportQuality
-        processingMsg = "渲染并写入相册 · ${q.displayName}"
+        processing = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 val full = FrameProcessor.loadFullForExport(context, uri, q.maxLongEdge)
@@ -179,17 +188,21 @@ fun HomeScreen(
                 )
                 ImageExporter.saveToGallery(context, out, uri, full.loaded, q)
             }
-            processingMsg = null
+            processing = false
             if (result != null) {
-                resultSummary = ResultSummary(
-                    savedUri = result.uri,
-                    previewBitmap = rendered?.asImageBitmap(),
-                    outputFormat = result.outputFormat,
-                    outputWidth = result.outputWidth,
-                    outputHeight = result.outputHeight,
-                    originalWidth = result.originalWidth,
-                    originalHeight = result.originalHeight,
-                    downsampled = result.downsampled,
+                onResult(
+                    ResultSummary(
+                        savedUri = result.uri,
+                        previewBitmap = rendered,
+                        outputFormat = result.outputFormat,
+                        outputWidth = result.outputWidth,
+                        outputHeight = result.outputHeight,
+                        originalWidth = result.originalWidth,
+                        originalHeight = result.originalHeight,
+                        downsampled = result.downsampled,
+                        templateName = template.displayName,
+                        quality = q.displayName,
+                    )
                 )
             }
         }
@@ -202,46 +215,56 @@ fun HomeScreen(
                 onSettings = onSettings,
             )
 
-            if (selectedUri == null) {
-                LandingPanel(
-                    modifier = Modifier.weight(1f),
-                    onPickSingle = {
-                        singleLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    onPickMulti = {
-                        multiLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                )
-            } else {
-                EditorPanel(
-                    modifier = Modifier.weight(1f),
-                    rendered = rendered,
-                    selectedUri = selectedUri,
-                    frameResult = frameResult,
-                    currentTemplate = currentTemplate,
-                    stripFrameChoice = stripFrameChoice,
-                    onToggleStripFrame = { stripFrameChoice = !stripFrameChoice },
-                    onSelectTemplate = ::pickTemplate,
-                    onPickAnother = {
-                        singleLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
-                    onToggleParams = { showParams = !showParams },
-                    onExport = ::exportFullRes,
-                    paramsOpen = showParams,
-                )
+            Crossfade(
+                targetState = selectedUri != null,
+                animationSpec = tween(durationMillis = 280),
+                modifier = Modifier.weight(1f),
+                label = "landing-vs-editor",
+            ) { hasImage ->
+                if (!hasImage) {
+                    LandingPanel(
+                        onPickSingle = {
+                            singleLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onPickMulti = {
+                            multiLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                    )
+                } else {
+                    EditorPanel(
+                        rendered = rendered,
+                        selectedUri = selectedUri,
+                        frameResult = frameResult,
+                        currentTemplate = currentTemplate,
+                        stripFrameChoice = stripFrameChoice,
+                        onToggleStripFrame = { stripFrameChoice = !stripFrameChoice },
+                        onSelectTemplate = ::pickTemplate,
+                        onPickAnother = {
+                            singleLauncher.launch(
+                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                            )
+                        },
+                        onToggleParams = { showParams = !showParams },
+                        onExport = ::exportFullRes,
+                        paramsOpen = showParams,
+                    )
+                }
             }
         }
 
-        if (showParams && currentTemplate != null) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+        AnimatedVisibility(
+            visible = showParams && currentTemplate != null,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            currentTemplate?.let { template ->
                 TemplateParamsPanel(
-                    template = currentTemplate!!,
+                    template = template,
                     adjustments = adjustments,
                     onChange = { adjustments = it },
                     onClose = { showParams = false },
@@ -249,25 +272,11 @@ fun HomeScreen(
             }
         }
 
-        processingMsg?.let {
-            ProcessingOverlay(title = "导出中", subtitle = it)
-        }
-
-        resultSummary?.let { summary ->
-            ResultDialog(
-                summary = summary,
-                onAnother = {
-                    resultSummary = null
-                    selectedUri = null
-                    rendered = null
-                    currentTemplate = null
-                    singleLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                onDone = { resultSummary = null },
-            )
-        }
+        ProcessingOverlay(
+            visible = processing,
+            title = "导出中",
+            subtitle = "渲染并写入 Pictures/FilmFrame · ${exportQuality.displayName}",
+        )
     }
 }
 
@@ -276,7 +285,8 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -286,26 +296,33 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
-        if (watermarkActive) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(GlassColors.AccentSoft)
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    "水印 · 开",
-                    color = GlassColors.Accent,
-                    style = MaterialTheme.typography.bodySmall,
-                    fontWeight = FontWeight.Medium,
-                )
+        AnimatedVisibility(
+            visible = watermarkActive,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 }),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(GlassColors.AccentSoft)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        "水印·开",
+                        color = GlassColors.Accent,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
             }
-            Spacer(Modifier.width(10.dp))
         }
         Box(
             modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.06f))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.07f))
+                .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
                 .clickable(onClick = onSettings)
                 .padding(horizontal = 14.dp, vertical = 8.dp),
         ) {
@@ -316,12 +333,11 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
 
 @Composable
 private fun LandingPanel(
-    modifier: Modifier = Modifier,
     onPickSingle: () -> Unit,
     onPickMulti: () -> Unit,
 ) {
     Box(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -340,13 +356,13 @@ private fun LandingPanel(
                 style = MaterialTheme.typography.displaySmall,
                 fontWeight = FontWeight.SemiBold,
             )
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
                 "本地处理 · EXIF 自动识别 · 5 个内置模板",
                 color = GlassColors.OnSurfaceFaint,
                 style = MaterialTheme.typography.bodySmall,
             )
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(44.dp))
             GlassButton(
                 text = "选一张照片",
                 accent = true,
@@ -365,7 +381,6 @@ private fun LandingPanel(
 
 @Composable
 private fun EditorPanel(
-    modifier: Modifier = Modifier,
     rendered: Bitmap?,
     selectedUri: Uri?,
     frameResult: FrameDetectionResult?,
@@ -378,85 +393,64 @@ private fun EditorPanel(
     onExport: () -> Unit,
     paramsOpen: Boolean,
 ) {
-    Column(modifier = modifier.fillMaxSize()) {
-        // Image preview
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Preview area with crossfade between AsyncImage (original) and rendered Bitmap
         Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp),
+                .padding(horizontal = 18.dp, vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
             GlassSurface(
                 modifier = Modifier.fillMaxSize(),
-                tonalIntensity = 0.6f,
+                intensity = 0.7f,
             ) {
                 Box(
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                    modifier = Modifier.fillMaxSize().padding(6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    when {
-                        rendered != null -> Image(
-                            bitmap = rendered.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                        selectedUri != null -> AsyncImage(
-                            model = selectedUri,
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize(),
-                        )
+                    Crossfade(
+                        targetState = rendered,
+                        animationSpec = tween(durationMillis = 260),
+                        label = "preview",
+                    ) { bmp ->
+                        when {
+                            bmp != null -> Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                            selectedUri != null -> AsyncImage(
+                                model = selectedUri,
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
                     }
                 }
             }
         }
 
-        frameResult?.takeIf { it.hasFrame }?.let { fr ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(RoundedCornerShape(3.dp))
-                        .background(GlassColors.Accent),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = if (stripFrameChoice) "原图已有边框 · 自动移除" else "原图已有边框 · 保留原状",
-                    color = GlassColors.OnSurfaceMuted,
-                    style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color.White.copy(alpha = 0.06f))
-                        .clickable(onClick = onToggleStripFrame)
-                        .padding(horizontal = 10.dp, vertical = 5.dp),
-                ) {
-                    Text(
-                        text = if (stripFrameChoice) "保留" else "移除",
-                        color = GlassColors.Accent,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium,
-                    )
-                }
-            }
+        AnimatedVisibility(
+            visible = frameResult?.hasFrame == true,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { -it }),
+        ) {
+            FrameDetectionBanner(
+                stripFrameChoice = stripFrameChoice,
+                onToggle = onToggleStripFrame,
+            )
         }
 
-        // Template chips
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(horizontal = 20.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp),
         ) {
             items(FrameRenderer.all) { template ->
                 TemplateChip(
@@ -467,11 +461,11 @@ private fun EditorPanel(
             }
         }
 
-        // Bottom action row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .navigationBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             GlassButton(
@@ -480,7 +474,7 @@ private fun EditorPanel(
                 modifier = Modifier.weight(1f),
             )
             GlassButton(
-                text = if (paramsOpen) "收起调整" else "调整",
+                text = if (paramsOpen) "收起" else "调整",
                 onClick = onToggleParams,
                 modifier = Modifier.weight(1f),
                 enabled = currentTemplate != null,
@@ -497,23 +491,79 @@ private fun EditorPanel(
 }
 
 @Composable
+private fun FrameDetectionBanner(
+    stripFrameChoice: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(6.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(GlassColors.Accent),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = if (stripFrameChoice) "原图已有边框 · 自动移除" else "原图已有边框 · 保留原状",
+            color = GlassColors.OnSurfaceMuted,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                .clickable(onClick = onToggle)
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+        ) {
+            Text(
+                text = if (stripFrameChoice) "保留" else "移除",
+                color = GlassColors.Accent,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
+@Composable
 private fun TemplateChip(
     template: FrameTemplate,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val border = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.12f)
-    val bg = if (selected) GlassColors.AccentSoft else Color.White.copy(alpha = 0.04f)
-    val textColor = if (selected) GlassColors.Accent else GlassColors.OnSurface
+    val borderColor by animateColorAsState(
+        targetValue = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.14f),
+        animationSpec = tween(220),
+        label = "border",
+    )
+    val bgColor by animateColorAsState(
+        targetValue = if (selected) GlassColors.AccentSoft else Color.White.copy(alpha = 0.04f),
+        animationSpec = tween(220),
+        label = "bg",
+    )
+    val textColor by animateColorAsState(
+        targetValue = if (selected) GlassColors.Accent else GlassColors.OnSurface,
+        animationSpec = tween(220),
+        label = "text",
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (selected) 1.4.dp else 0.5.dp,
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "borderW",
+    )
+
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(bg)
-            .border(
-                if (selected) 1.2.dp else 0.5.dp,
-                border,
-                RoundedCornerShape(12.dp),
-            )
+            .background(bgColor)
+            .border(borderWidth, borderColor, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {

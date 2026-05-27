@@ -15,7 +15,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -168,9 +170,12 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
             )
         }
 
-        exportProgress?.let {
-            ProcessingOverlay(title = "批量导出中", subtitle = "正在写入 Pictures/FilmFrame", progress = it)
-        }
+        ProcessingOverlay(
+            visible = exportProgress != null,
+            title = "批量导出中",
+            subtitle = "正在写入 Pictures/FilmFrame",
+            progress = exportProgress,
+        )
 
         resultMsg?.let { msg ->
             androidx.compose.material3.AlertDialog(
@@ -199,6 +204,7 @@ private fun TopBar(title: String, subtitle: String?, onBack: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -329,6 +335,7 @@ private fun BottomActionBar(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
