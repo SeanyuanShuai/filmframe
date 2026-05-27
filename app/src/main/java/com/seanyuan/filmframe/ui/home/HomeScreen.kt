@@ -2,9 +2,6 @@ package com.seanyuan.filmframe.ui.home
 
 import android.graphics.Bitmap
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -84,7 +81,10 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun HomeScreen(
-    onBatch: (List<Uri>) -> Unit,
+    initialUri: Uri?,
+    onConsumeInitialUri: () -> Unit,
+    onRequestPickSingle: () -> Unit,
+    onRequestPickMulti: () -> Unit,
     onSettings: () -> Unit,
     onResult: (ResultSummary) -> Unit,
     modifier: Modifier = Modifier,
@@ -108,25 +108,19 @@ fun HomeScreen(
     var showParams by remember { mutableStateOf(false) }
     var processing by remember { mutableStateOf(false) }
 
-    val singleLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri: Uri? ->
-        if (uri != null) {
-            selectedUri = uri
-            exif = ExifReader.read(context, uri)
-            frameResult = null
-            sourceBitmap = null
-            rendered = null
-            currentTemplate = null
-            stripFrameChoice = false
-            adjustments = TemplateAdjustments.Default
-            showParams = false
-        }
+    LaunchedEffect(initialUri) {
+        val u = initialUri ?: return@LaunchedEffect
+        selectedUri = u
+        exif = ExifReader.read(context, u)
+        frameResult = null
+        sourceBitmap = null
+        rendered = null
+        currentTemplate = null
+        stripFrameChoice = false
+        adjustments = TemplateAdjustments.Default
+        showParams = false
+        onConsumeInitialUri()
     }
-
-    val multiLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 30)
-    ) { uris -> if (uris.isNotEmpty()) onBatch(uris) }
 
     LaunchedEffect(selectedUri) {
         val uri = selectedUri ?: return@LaunchedEffect
@@ -223,16 +217,8 @@ fun HomeScreen(
             ) { hasImage ->
                 if (!hasImage) {
                     LandingPanel(
-                        onPickSingle = {
-                            singleLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
-                        onPickMulti = {
-                            multiLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
+                        onPickSingle = onRequestPickSingle,
+                        onPickMulti = onRequestPickMulti,
                     )
                 } else {
                     EditorPanel(
@@ -243,11 +229,7 @@ fun HomeScreen(
                         stripFrameChoice = stripFrameChoice,
                         onToggleStripFrame = { stripFrameChoice = !stripFrameChoice },
                         onSelectTemplate = ::pickTemplate,
-                        onPickAnother = {
-                            singleLauncher.launch(
-                                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                            )
-                        },
+                        onPickAnother = onRequestPickSingle,
                         onToggleParams = { showParams = !showParams },
                         onExport = ::exportFullRes,
                         paramsOpen = showParams,

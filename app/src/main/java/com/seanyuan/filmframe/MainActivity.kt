@@ -25,6 +25,8 @@ import androidx.compose.ui.Modifier
 import com.seanyuan.filmframe.ui.batch.BatchScreen
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.home.HomeScreen
+import com.seanyuan.filmframe.ui.picker.PhotoPickerScreen
+import com.seanyuan.filmframe.ui.picker.PickerMode
 import com.seanyuan.filmframe.ui.result.ResultScreen
 import com.seanyuan.filmframe.ui.result.ResultSummary
 import com.seanyuan.filmframe.ui.settings.SettingsScreen
@@ -33,7 +35,9 @@ import com.seanyuan.filmframe.ui.theme.FilmFrameTheme
 private sealed interface Route {
     val depth: Int
     data object Home : Route { override val depth = 0 }
-    data class Batch(val uris: List<Uri>) : Route { override val depth = 1 }
+    data object PickerSingle : Route { override val depth = 1 }
+    data object PickerMulti : Route { override val depth = 1 }
+    data class Batch(val uris: List<Uri>) : Route { override val depth = 2 }
     data object Settings : Route { override val depth = 2 }
     data class Result(val summary: ResultSummary) : Route { override val depth = 3 }
 }
@@ -61,29 +65,51 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AppRoot(modifier: Modifier = Modifier) {
     var route by remember { mutableStateOf<Route>(Route.Home) }
+    var pendingPickedUri by remember { mutableStateOf<Uri?>(null) }
+
     AnimatedContent(
         targetState = route,
         modifier = modifier,
         transitionSpec = {
             val forward = targetState.depth > initialState.depth
             val w = 220
-            val tween1 = tween<Float>(durationMillis = 320)
-            val tween2 = tween<androidx.compose.ui.unit.IntOffset>(durationMillis = 320)
+            val durF = tween<Float>(durationMillis = 320)
+            val durO = tween<androidx.compose.ui.unit.IntOffset>(durationMillis = 320)
             if (forward) {
-                slideInHorizontally(tween2) { w } + fadeIn(tween1) togetherWith
-                    slideOutHorizontally(tween2) { -w / 4 } + fadeOut(tween1)
+                slideInHorizontally(durO) { w } + fadeIn(durF) togetherWith
+                    slideOutHorizontally(durO) { -w / 4 } + fadeOut(durF)
             } else {
-                slideInHorizontally(tween2) { -w / 4 } + fadeIn(tween1) togetherWith
-                    slideOutHorizontally(tween2) { w } + fadeOut(tween1)
+                slideInHorizontally(durO) { -w / 4 } + fadeIn(durF) togetherWith
+                    slideOutHorizontally(durO) { w } + fadeOut(durF)
             }
         },
         label = "route",
     ) { r ->
         when (r) {
             Route.Home -> HomeScreen(
-                onBatch = { route = Route.Batch(it) },
+                initialUri = pendingPickedUri,
+                onConsumeInitialUri = { pendingPickedUri = null },
+                onRequestPickSingle = { route = Route.PickerSingle },
+                onRequestPickMulti = { route = Route.PickerMulti },
                 onSettings = { route = Route.Settings },
                 onResult = { route = Route.Result(it) },
+                modifier = Modifier.fillMaxSize(),
+            )
+            Route.PickerSingle -> PhotoPickerScreen(
+                mode = PickerMode.Single,
+                onBack = { route = Route.Home },
+                onPickSingle = { uri ->
+                    pendingPickedUri = uri
+                    route = Route.Home
+                },
+                onPickMulti = { },
+                modifier = Modifier.fillMaxSize(),
+            )
+            Route.PickerMulti -> PhotoPickerScreen(
+                mode = PickerMode.Multi,
+                onBack = { route = Route.Home },
+                onPickSingle = { },
+                onPickMulti = { uris -> route = Route.Batch(uris) },
                 modifier = Modifier.fillMaxSize(),
             )
             is Route.Batch -> BatchScreen(
@@ -98,7 +124,9 @@ private fun AppRoot(modifier: Modifier = Modifier) {
             is Route.Result -> ResultScreen(
                 summary = r.summary,
                 onHome = { route = Route.Home },
-                onAnother = { route = Route.Home },
+                onAnother = {
+                    route = Route.PickerSingle
+                },
                 modifier = Modifier.fillMaxSize(),
             )
         }
