@@ -63,6 +63,14 @@ object FrameDetector {
     private const val SAFETY_INSET_RATIO = 0.006f
     private const val MAX_INSET_RATIO = 0.5f
 
+    /**
+     * Android-bound entry point. Downsamples the bitmap, extracts its pixel
+     * array, then defers to the pure-Kotlin [detectFromPixels]. Insets are
+     * then scaled back from analysis resolution to source resolution.
+     *
+     * Cross-platform note: `detectFromPixels` is platform-independent. iOS /
+     * KMP can call it directly by feeding an IntArray of ARGB pixels.
+     */
     fun detect(source: Bitmap): FrameDetectionResult {
         val sample = downsample(source)
         val w = sample.width
@@ -70,6 +78,33 @@ object FrameDetector {
         val pixels = IntArray(w * h)
         sample.getPixels(pixels, 0, w, 0, 0, w, h)
 
+        val analysisResult = detectFromPixels(pixels, w, h)
+        if (!analysisResult.hasFrame) return analysisResult
+
+        // Scale insets back to source resolution.
+        val scaleX = source.width.toFloat() / w
+        val scaleY = source.height.toFloat() / h
+        val ins = analysisResult.insets
+        return analysisResult.copy(
+            insets = FrameInsets(
+                top = (ins.top * scaleY).toInt(),
+                bottom = (ins.bottom * scaleY).toInt(),
+                left = (ins.left * scaleX).toInt(),
+                right = (ins.right * scaleX).toInt(),
+            ),
+        )
+    }
+
+    /**
+     * Pure-Kotlin detection given an IntArray of ARGB pixels and dimensions.
+     * No Android dependencies — usable as-is in KMP shared module or
+     * ported verbatim to Swift on iOS.
+     *
+     * Inset values returned are in the SAME pixel space as the input
+     * (i.e., already at analysis resolution). Callers in lazier languages
+     * can pass the original image directly if it's small enough.
+     */
+    fun detectFromPixels(pixels: IntArray, w: Int, h: Int): FrameDetectionResult {
         val cornerColors = sampleCornerColors(pixels, w, h)
         val cornerVar = maxColorSpread(cornerColors)
         if (cornerVar > CORNER_INTRA_VARIANCE_LIMIT) {
@@ -126,19 +161,14 @@ object FrameDetector {
         val leftFinal = (leftInset + safetyH).coerceAtMost(capH)
         val rightFinal = (rightInset + safetyH).coerceAtMost(capH)
 
-        val scaleX = source.width.toFloat() / w
-        val scaleY = source.height.toFloat() / h
-
-        val insetsFull = FrameInsets(
-            top = (topFinal * scaleY).toInt(),
-            bottom = (bottomFinal * scaleY).toInt(),
-            left = (leftFinal * scaleX).toInt(),
-            right = (rightFinal * scaleX).toInt(),
-        )
-
         val confidence = computeConfidence(strictTop, strictBottom, strictLeft, strictRight, w, h)
 
-        return FrameDetectionResult(true, insetsFull, frameColor, confidence)
+        return FrameDetectionResult(
+            hasFrame = true,
+            insets = FrameInsets(top = topFinal, bottom = bottomFinal, left = leftFinal, right = rightFinal),
+            frameColor = frameColor,
+            confidence = confidence,
+        )
     }
 
     private fun downsample(source: Bitmap): Bitmap {
