@@ -2,6 +2,7 @@ package com.seanyuan.filmframe.ui.home
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -108,6 +109,25 @@ fun HomeScreen(
     var adjustments by remember { mutableStateOf(TemplateAdjustments.Default) }
     var showParams by remember { mutableStateOf(false) }
     var processing by remember { mutableStateOf(false) }
+
+    // System back: close params first → clear editor state → fall through to
+    // system (App exits). Without this, back from editor exits the app
+    // unexpectedly because there's no nav-back stack for in-screen state.
+    BackHandler(enabled = showParams || selectedUri != null) {
+        when {
+            showParams -> showParams = false
+            selectedUri != null -> {
+                selectedUri = null
+                sourceBitmap = null
+                rendered = null
+                currentTemplate = null
+                stripFrameChoice = false
+                adjustments = TemplateAdjustments.Default
+                frameResult = null
+                exif = null
+            }
+        }
+    }
 
     LaunchedEffect(initialUri) {
         val u = initialUri ?: return@LaunchedEffect

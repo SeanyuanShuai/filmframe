@@ -1,5 +1,6 @@
 package com.seanyuan.filmframe.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -60,6 +61,8 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val autoRemoveFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
 
     var draftWatermark by remember(watermark) { mutableStateOf(watermark) }
+
+    BackHandler { onBack() }
 
     // Auto-save watermark draft with 400 ms debounce — covers typing in
     // the text field without a write storm. Prior behavior lost text if the

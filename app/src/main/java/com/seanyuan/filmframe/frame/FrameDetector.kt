@@ -20,31 +20,48 @@ data class FrameDetectionResult(
 }
 
 /**
- * Detects whether a photo already has a solid-color border (the kind added by
- * OPPO HASSELBLAD, Xiaomi Leica, NOMO, 黄油相机 etc.) so we can strip it before
- * applying FilmFrame's own border.
+ * v3 — solves both the v1 'leaves residual edges on OPPO HASSELBLAD' bug AND
+ * the v2 'aggressively crops dark photos into a 1cm strip' regression.
  *
- * Approach:
- *   1. Downsample to ~600px long edge for cheap analysis.
- *   2. Sample 4 corner regions. If their color is not uniform, no frame.
- *   3. Take the median corner color as the candidate frame color.
- *   4. Walk inward from each of the 4 edges, row by row / col by col.
- *      A row counts as "frame" if ≥85% of its pixels match the frame color
- *      within a per-channel tolerance. (Tolerates small dark text glyphs.)
- *   5. Require all 4 sides to have at least 0.5% frame inset to declare HasFrame.
- *   6. Map the detected insets back to the original bitmap resolution.
+ * Approach: two-pass walk per edge.
  *
- * Out of scope (v0.1): non-rectangular masks, gradient frames, rounded corners,
- * polaroid-style frames where top inset is 0.
+ *   STRICT pass (0.92 match / 3 miss tolerance):
+ *     "Is there actually a frame on this side?" Strict thresholds avoid
+ *     false positives on photos where the corner happens to be near-uniform
+ *     (dark sky, snow, bokeh). If strict gives < MIN_FRAME_RATIO inset on
+ *     any side, we declare 'no frame' and return.
+ *
+ *   LOOSE pass (0.75 match / 10 miss tolerance):
+ *     "How far does the frame actually extend?" Only run when strict
+ *     confirms a frame. The loose pass walks past anti-aliased fringe and
+ *     dark text bands (the OPPO HASSELBLAD bottom mat case).
+ *
+ *   Anti-runaway cap:
+ *     Loose inset is capped at strict_inset × 3. Typical frame extension
+ *     past strict boundary is just a few text rows (1.5-2× max). A loose
+ *     inset 40× the strict inset means LOOSE ran away into photo content —
+ *     fall back to strict on that side.
+ *
+ *   Safety margin (0.6% of dim) added after the cap, then everything
+ *   maxed at 50% of dim.
+ *
+ * Out of scope: rounded corner frames, gradient frames, polaroid-style
+ * (top-only inset), non-rectangular masks.
  */
 object FrameDetector {
 
     private const val MAX_ANALYSIS_DIM = 600
-    private const val PER_CHANNEL_TOLERANCE = 14
-    private const val ROW_MATCH_THRESHOLD = 0.85f
-    private const val MIN_FRAME_RATIO = 0.005f
-    private const val CORNER_SAMPLE_FRACTION = 0.04f // 4% from corner inward
+    private const val PER_CHANNEL_TOLERANCE = 22
+    private const val STRICT_ROW_THRESHOLD = 0.92f
+    private const val STRICT_MISS_TOLERANCE = 3
+    private const val LOOSE_ROW_THRESHOLD = 0.75f
+    private const val LOOSE_MISS_TOLERANCE = 10
+    private const val MIN_FRAME_RATIO = 0.012f  // 1.2% of dim — typical real frames are >5%
+    private const val CORNER_SAMPLE_FRACTION = 0.05f
     private const val CORNER_INTRA_VARIANCE_LIMIT = 18
+    private const val LOOSE_OVER_STRICT_CAP = 3f
+    private const val SAFETY_INSET_RATIO = 0.006f
+    private const val MAX_INSET_RATIO = 0.5f
 
     fun detect(source: Bitmap): FrameDetectionResult {
         val sample = downsample(source)
@@ -61,36 +78,65 @@ object FrameDetector {
 
         val frameColor = medianColor(cornerColors)
 
-        val topInset = walkVertical(pixels, w, h, frameColor, fromTop = true)
-        val bottomInset = walkVertical(pixels, w, h, frameColor, fromTop = false)
-        val leftInset = walkHorizontal(pixels, w, h, frameColor, fromLeft = true)
-        val rightInset = walkHorizontal(pixels, w, h, frameColor, fromLeft = false)
+        // STRICT pass — does a real frame exist?
+        val strictTop = walkVertical(pixels, w, h, frameColor, fromTop = true,
+            threshold = STRICT_ROW_THRESHOLD, missTol = STRICT_MISS_TOLERANCE)
+        val strictBottom = walkVertical(pixels, w, h, frameColor, fromTop = false,
+            threshold = STRICT_ROW_THRESHOLD, missTol = STRICT_MISS_TOLERANCE)
+        val strictLeft = walkHorizontal(pixels, w, h, frameColor, fromLeft = true,
+            threshold = STRICT_ROW_THRESHOLD, missTol = STRICT_MISS_TOLERANCE)
+        val strictRight = walkHorizontal(pixels, w, h, frameColor, fromLeft = false,
+            threshold = STRICT_ROW_THRESHOLD, missTol = STRICT_MISS_TOLERANCE)
 
-        val minTop = max(1, (h * MIN_FRAME_RATIO).toInt())
-        val minBottom = max(1, (h * MIN_FRAME_RATIO).toInt())
-        val minLeft = max(1, (w * MIN_FRAME_RATIO).toInt())
-        val minRight = max(1, (w * MIN_FRAME_RATIO).toInt())
+        val minV = max(1, (h * MIN_FRAME_RATIO).toInt())
+        val minH = max(1, (w * MIN_FRAME_RATIO).toInt())
 
-        val hasFrame = topInset >= minTop &&
-            bottomInset >= minBottom &&
-            leftInset >= minLeft &&
-            rightInset >= minRight
+        val frameConfirmed = strictTop >= minV &&
+            strictBottom >= minV &&
+            strictLeft >= minH &&
+            strictRight >= minH
 
-        if (!hasFrame) {
+        if (!frameConfirmed) {
             return FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), frameColor, 0f)
         }
+
+        // LOOSE pass — extend past text bands / AA fringe.
+        val looseTop = walkVertical(pixels, w, h, frameColor, fromTop = true,
+            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+        val looseBottom = walkVertical(pixels, w, h, frameColor, fromTop = false,
+            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+        val looseLeft = walkHorizontal(pixels, w, h, frameColor, fromLeft = true,
+            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+        val looseRight = walkHorizontal(pixels, w, h, frameColor, fromLeft = false,
+            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+
+        // Cap loose by strict×3 to prevent runaway into photo content.
+        val topInset = min(looseTop, (strictTop * LOOSE_OVER_STRICT_CAP).toInt())
+        val bottomInset = min(looseBottom, (strictBottom * LOOSE_OVER_STRICT_CAP).toInt())
+        val leftInset = min(looseLeft, (strictLeft * LOOSE_OVER_STRICT_CAP).toInt())
+        val rightInset = min(looseRight, (strictRight * LOOSE_OVER_STRICT_CAP).toInt())
+
+        // Safety margin + hard cap.
+        val safetyV = (h * SAFETY_INSET_RATIO).toInt()
+        val safetyH = (w * SAFETY_INSET_RATIO).toInt()
+        val capV = (h * MAX_INSET_RATIO).toInt()
+        val capH = (w * MAX_INSET_RATIO).toInt()
+        val topFinal = (topInset + safetyV).coerceAtMost(capV)
+        val bottomFinal = (bottomInset + safetyV).coerceAtMost(capV)
+        val leftFinal = (leftInset + safetyH).coerceAtMost(capH)
+        val rightFinal = (rightInset + safetyH).coerceAtMost(capH)
 
         val scaleX = source.width.toFloat() / w
         val scaleY = source.height.toFloat() / h
 
         val insetsFull = FrameInsets(
-            top = (topInset * scaleY).toInt(),
-            bottom = (bottomInset * scaleY).toInt(),
-            left = (leftInset * scaleX).toInt(),
-            right = (rightInset * scaleX).toInt(),
+            top = (topFinal * scaleY).toInt(),
+            bottom = (bottomFinal * scaleY).toInt(),
+            left = (leftFinal * scaleX).toInt(),
+            right = (rightFinal * scaleX).toInt(),
         )
 
-        val confidence = computeConfidence(topInset, bottomInset, leftInset, rightInset, w, h)
+        val confidence = computeConfidence(strictTop, strictBottom, strictLeft, strictRight, w, h)
 
         return FrameDetectionResult(true, insetsFull, frameColor, confidence)
     }
@@ -108,10 +154,10 @@ object FrameDetector {
         val sw = max(2, (w * CORNER_SAMPLE_FRACTION).toInt())
         val sh = max(2, (h * CORNER_SAMPLE_FRACTION).toInt())
         return intArrayOf(
-            averageRegion(pixels, w, 0, 0, sw, sh),                  // TL
-            averageRegion(pixels, w, w - sw, 0, sw, sh),              // TR
-            averageRegion(pixels, w, 0, h - sh, sw, sh),              // BL
-            averageRegion(pixels, w, w - sw, h - sh, sw, sh),         // BR
+            averageRegion(pixels, w, 0, 0, sw, sh),
+            averageRegion(pixels, w, w - sw, 0, sw, sh),
+            averageRegion(pixels, w, 0, h - sh, sw, sh),
+            averageRegion(pixels, w, w - sw, h - sh, sw, sh),
         )
     }
 
@@ -179,42 +225,47 @@ object FrameDetector {
         return match.toFloat() / h
     }
 
-    private fun walkVertical(pixels: IntArray, w: Int, h: Int, frameColor: Int, fromTop: Boolean): Int {
-        val maxScan = (h * 0.5f).toInt()
+    private fun walkVertical(
+        pixels: IntArray, w: Int, h: Int, frameColor: Int, fromTop: Boolean,
+        threshold: Float, missTol: Int,
+    ): Int {
+        val maxScan = (h * MAX_INSET_RATIO).toInt()
         var inset = 0
         var consecutiveMiss = 0
         for (i in 0 until maxScan) {
             val y = if (fromTop) i else h - 1 - i
-            if (rowMatchRatio(pixels, w, y, frameColor) >= ROW_MATCH_THRESHOLD) {
+            if (rowMatchRatio(pixels, w, y, frameColor) >= threshold) {
                 inset = i + 1
                 consecutiveMiss = 0
             } else {
                 consecutiveMiss++
-                if (consecutiveMiss >= 3) break  // tolerate 2 jitter rows
+                if (consecutiveMiss >= missTol) break
             }
         }
         return inset
     }
 
-    private fun walkHorizontal(pixels: IntArray, w: Int, h: Int, frameColor: Int, fromLeft: Boolean): Int {
-        val maxScan = (w * 0.5f).toInt()
+    private fun walkHorizontal(
+        pixels: IntArray, w: Int, h: Int, frameColor: Int, fromLeft: Boolean,
+        threshold: Float, missTol: Int,
+    ): Int {
+        val maxScan = (w * MAX_INSET_RATIO).toInt()
         var inset = 0
         var consecutiveMiss = 0
         for (i in 0 until maxScan) {
             val x = if (fromLeft) i else w - 1 - i
-            if (colMatchRatio(pixels, w, h, x, frameColor) >= ROW_MATCH_THRESHOLD) {
+            if (colMatchRatio(pixels, w, h, x, frameColor) >= threshold) {
                 inset = i + 1
                 consecutiveMiss = 0
             } else {
                 consecutiveMiss++
-                if (consecutiveMiss >= 3) break
+                if (consecutiveMiss >= missTol) break
             }
         }
         return inset
     }
 
     private fun computeConfidence(top: Int, bottom: Int, left: Int, right: Int, w: Int, h: Int): Float {
-        // Higher confidence when frame is detected on all 4 sides with meaningful width
         val tRatio = top.toFloat() / h
         val bRatio = bottom.toFloat() / h
         val lRatio = left.toFloat() / w

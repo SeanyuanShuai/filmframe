@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings as AndroidSettings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -124,6 +125,8 @@ fun PhotoPickerScreen(
     }
 
     val selectedIds = remember { mutableStateListOf<Long>() }
+
+    BackHandler { onBack() }
 
     Box(modifier = modifier.fillMaxSize().background(GlassColors.DeepBackground)) {
         Column(modifier = Modifier.fillMaxSize()) {

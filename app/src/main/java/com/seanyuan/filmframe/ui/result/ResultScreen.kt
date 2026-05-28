@@ -3,6 +3,7 @@ package com.seanyuan.filmframe.ui.result
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -70,6 +71,8 @@ fun ResultScreen(
     val context = LocalContext.current
     var chromeVisible by remember { mutableStateOf(true) }
     val previewBitmap = summary.previewBitmap?.asImageBitmap()
+
+    BackHandler { onHome() }
 
     Box(
         modifier = modifier
