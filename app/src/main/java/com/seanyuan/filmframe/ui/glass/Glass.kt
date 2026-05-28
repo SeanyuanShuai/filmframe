@@ -129,6 +129,7 @@ fun GlassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     accent: Boolean = false,
+    compact: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -201,7 +202,10 @@ fun GlassButton(
                     )
                 }
             }
-            .padding(horizontal = 22.dp, vertical = 14.dp),
+            .padding(
+                horizontal = if (compact) 12.dp else 22.dp,
+                vertical = if (compact) 12.dp else 14.dp,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(
@@ -219,8 +223,9 @@ fun GlassButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     accent: Boolean = false,
+    compact: Boolean = false,
 ) {
-    GlassButton(onClick = onClick, modifier = modifier, enabled = enabled, accent = accent) {
+    GlassButton(onClick = onClick, modifier = modifier, enabled = enabled, accent = accent, compact = compact) {
         Text(
             text = text,
             style = MaterialTheme.typography.bodyLarge,

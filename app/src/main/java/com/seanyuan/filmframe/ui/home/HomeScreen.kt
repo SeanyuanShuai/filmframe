@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -85,10 +87,10 @@ import kotlinx.coroutines.withContext
 fun HomeScreen(
     initialUri: Uri?,
     onConsumeInitialUri: () -> Unit,
-    onRequestPickSingle: () -> Unit,
-    onRequestPickMulti: () -> Unit,
+    onRequestPick: () -> Unit,
     onSettings: () -> Unit,
     onResult: (ResultSummary) -> Unit,
+    onOpenSavedExhibit: (ResultSummary) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -247,6 +249,7 @@ fun HomeScreen(
                         downsampled = result.downsampled,
                         templateName = template.displayName,
                         quality = q.displayName,
+                        sourceUri = uri,
                     )
                 )
             }
@@ -268,8 +271,8 @@ fun HomeScreen(
             ) { hasImage ->
                 if (!hasImage) {
                     LandingPanel(
-                        onPickSingle = onRequestPickSingle,
-                        onPickMulti = onRequestPickMulti,
+                        onPick = onRequestPick,
+                        onOpenSavedExhibit = onOpenSavedExhibit,
                     )
                 } else {
                     EditorPanel(
@@ -280,7 +283,7 @@ fun HomeScreen(
                         stripFrameChoice = stripFrameChoice,
                         onToggleStripFrame = { stripFrameChoice = !stripFrameChoice },
                         onSelectTemplate = ::pickTemplate,
-                        onPickAnother = onRequestPickSingle,
+                        onPickAnother = onRequestPick,
                         onToggleParams = { showParams = !showParams },
                         onExport = ::exportFullRes,
                         paramsOpen = showParams,
@@ -366,48 +369,184 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
 
 @Composable
 private fun LandingPanel(
-    onPickSingle: () -> Unit,
-    onPickMulti: () -> Unit,
+    onPick: () -> Unit,
+    onOpenSavedExhibit: (ResultSummary) -> Unit,
 ) {
+    val context = LocalContext.current
+    val permission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+        android.Manifest.permission.READ_MEDIA_IMAGES
+    } else {
+        android.Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    var granted by remember {
+        mutableStateOf(
+            context.checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+    // Re-check permission on resume so granting via Picker propagates back here.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                granted = context.checkSelfPermission(permission) ==
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
+
+    val entries = remember { mutableStateOf<List<com.seanyuan.filmframe.data.GalleryEntry>>(emptyList()) }
+    var loaded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(granted) {
+        if (!granted) {
+            loaded = true
+            entries.value = emptyList()
+            return@LaunchedEffect
+        }
+        val list = withContext(Dispatchers.IO) {
+            com.seanyuan.filmframe.data.MediaGallery.listFilmFrameOutputs(context, limit = 12)
+        }
+        entries.value = list
+        loaded = true
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+    ) {
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Gallery 级的胶卷边框",
+            color = GlassColors.OnSurfaceMuted,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            "本地处理 · EXIF 自动识别",
+            color = GlassColors.OnSurfaceFaint,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Spacer(Modifier.height(20.dp))
+
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            when {
+                !loaded -> Unit
+                !granted -> EmptyExhibitHint(
+                    title = "你的第一张作品",
+                    body = "选一张照片，给它一个胶卷感的边框",
+                )
+                entries.value.isEmpty() -> EmptyExhibitHint(
+                    title = "你的第一张作品",
+                    body = "选一张照片，给它一个胶卷感的边框",
+                )
+                else -> RecentWorksExhibit(
+                    entries = entries.value,
+                    onOpen = onOpenSavedExhibit,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        GlassButton(
+            text = "选照片",
+            accent = true,
+            onClick = onPick,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun EmptyExhibitHint(title: String, body: String) {
     Box(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 28.dp),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
-                "为你的照片加上",
+                title,
                 color = GlassColors.OnSurfaceMuted,
                 style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                "Gallery 级的边框",
-                color = GlassColors.OnSurface,
-                style = MaterialTheme.typography.displaySmall,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "本地处理 · EXIF 自动识别 · 5 个内置模板",
+                body,
                 color = GlassColors.OnSurfaceFaint,
                 style = MaterialTheme.typography.bodySmall,
             )
-            Spacer(Modifier.height(44.dp))
-            GlassButton(
-                text = "选一张照片",
-                accent = true,
-                onClick = onPickSingle,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
-            GlassButton(
-                text = "批处理多张",
-                onClick = onPickMulti,
-                modifier = Modifier.fillMaxWidth(),
-            )
+        }
+    }
+}
+
+@Composable
+private fun RecentWorksExhibit(
+    entries: List<com.seanyuan.filmframe.data.GalleryEntry>,
+    onOpen: (ResultSummary) -> Unit,
+) {
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { entries.size })
+    val context = LocalContext.current
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text(
+            "最近作品 · ${entries.size}",
+            color = GlassColors.OnSurfaceFaint,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(bottom = 10.dp),
+        )
+        androidx.compose.foundation.pager.HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 28.dp),
+            pageSpacing = 16.dp,
+        ) { page ->
+            val entry = entries[page]
+            val aspect = if (entry.width > 0 && entry.height > 0) {
+                entry.width.toFloat() / entry.height
+            } else 0.7f
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .aspectRatio(aspect.coerceIn(0.4f, 2.5f))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF0B0B0D))
+                        .clickable {
+                            onOpen(
+                                ResultSummary(
+                                    savedUri = entry.uri,
+                                    previewBitmap = null,
+                                    outputFormat = "—",
+                                    outputWidth = entry.width,
+                                    outputHeight = entry.height,
+                                    originalWidth = 0,
+                                    originalHeight = 0,
+                                    downsampled = false,
+                                    templateName = "已保存作品",
+                                    quality = "—",
+                                    sourceUri = null,
+                                )
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = entry.uri,
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }

@@ -59,6 +59,9 @@ data class ResultSummary(
     val downsampled: Boolean,
     val templateName: String,
     val quality: String,
+    // Source photo URI for the "换模板" loop-back action. Null when the entry
+    // is browsed from Landing exhibit (we no longer have the original source).
+    val sourceUri: Uri? = null,
 )
 
 @Composable
@@ -66,6 +69,7 @@ fun ResultScreen(
     summary: ResultSummary,
     onAnother: () -> Unit,
     onHome: () -> Unit,
+    onRetemplate: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -181,22 +185,33 @@ fun ResultScreen(
                             )
                         }
                         Spacer(Modifier.height(14.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GlassButton(
-                                text = "返回首页",
+                                text = "首页",
                                 onClick = onHome,
                                 modifier = Modifier.weight(1f),
+                                compact = true,
                             )
                             GlassButton(
                                 text = "分享",
                                 onClick = { shareImage(context, summary.savedUri) },
                                 modifier = Modifier.weight(1f),
+                                compact = true,
                             )
+                            if (onRetemplate != null && summary.sourceUri != null) {
+                                GlassButton(
+                                    text = "换模板",
+                                    onClick = onRetemplate,
+                                    modifier = Modifier.weight(1.2f),
+                                    compact = true,
+                                )
+                            }
                             GlassButton(
-                                text = "再来一张",
+                                text = "再来",
                                 accent = true,
                                 onClick = onAnother,
                                 modifier = Modifier.weight(1f),
+                                compact = true,
                             )
                         }
                     }

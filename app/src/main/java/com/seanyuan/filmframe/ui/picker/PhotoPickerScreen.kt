@@ -66,14 +66,10 @@ import com.seanyuan.filmframe.ui.glass.GlassSurface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-enum class PickerMode { Single, Multi }
-
 @Composable
 fun PhotoPickerScreen(
-    mode: PickerMode,
     onBack: () -> Unit,
-    onPickSingle: (Uri) -> Unit,
-    onPickMulti: (List<Uri>) -> Unit,
+    onConfirm: (List<Uri>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -131,12 +127,13 @@ fun PhotoPickerScreen(
     Box(modifier = modifier.fillMaxSize().background(GlassColors.DeepBackground)) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopBar(
-                title = if (mode == PickerMode.Multi) "选择多张照片" else "选择照片",
+                title = "选择照片",
                 subtitle = when {
                     !granted -> "需要相册权限"
                     !loaded -> "加载中…"
-                    mode == PickerMode.Multi -> "已选 ${selectedIds.size}"
-                    else -> "${entries.size} 张照片 · 新到旧"
+                    selectedIds.isEmpty() -> "${entries.size} 张照片 · 新到旧"
+                    selectedIds.size == 1 -> "已选 1 张 · 进入编辑"
+                    else -> "已选 ${selectedIds.size} 张 · 进入批处理"
                 },
                 onBack = onBack,
             )
@@ -155,31 +152,27 @@ fun PhotoPickerScreen(
                 )
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(if (mode == PickerMode.Multi) 3 else 2),
+                    columns = GridCells.Fixed(3),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.weight(1f),
                 ) {
                     items(entries, key = { it.id }) { entry ->
-                        val isSelected = mode == PickerMode.Multi && selectedIds.contains(entry.id)
+                        val isSelected = selectedIds.contains(entry.id)
                         PhotoCell(
                             entry = entry,
                             selected = isSelected,
                             onTap = {
-                                if (mode == PickerMode.Multi) {
-                                    if (isSelected) selectedIds.remove(entry.id)
-                                    else if (selectedIds.size < 30) selectedIds.add(entry.id)
-                                } else {
-                                    onPickSingle(entry.uri)
-                                }
+                                if (isSelected) selectedIds.remove(entry.id)
+                                else if (selectedIds.size < 30) selectedIds.add(entry.id)
                             },
                         )
                     }
                 }
             }
 
-            if (mode == PickerMode.Multi && granted) {
+            if (granted) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -193,17 +186,22 @@ fun PhotoPickerScreen(
                         enabled = selectedIds.isNotEmpty(),
                         modifier = Modifier.weight(1f),
                     )
+                    val confirmLabel = when (selectedIds.size) {
+                        0 -> "选照片"
+                        1 -> "编辑这张"
+                        else -> "进入批处理 · ${selectedIds.size}"
+                    }
                     GlassButton(
-                        text = "进入批处理 (${selectedIds.size})",
+                        text = confirmLabel,
                         accent = true,
                         enabled = selectedIds.isNotEmpty(),
                         onClick = {
                             val uris = entries
                                 .filter { it.id in selectedIds }
                                 .map { it.uri }
-                            onPickMulti(uris)
+                            onConfirm(uris)
                         },
-                        modifier = Modifier.weight(1.6f),
+                        modifier = Modifier.weight(1.8f),
                     )
                 }
             }

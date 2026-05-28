@@ -198,6 +198,7 @@ fun BatchScreen(
 
             BottomActionBar(
                 ready = loadingDone == uris.size,
+                count = items.size,
                 onApplyAll = { templateId ->
                     for (i in items.indices) items[i] = items[i].copy(selectedTemplateId = templateId)
                 },
@@ -513,6 +514,7 @@ private fun PolaroidTile(
 @Composable
 private fun BottomActionBar(
     ready: Boolean,
+    count: Int,
     onApplyAll: (String) -> Unit,
     onExportAll: () -> Unit,
 ) {
@@ -565,17 +567,17 @@ private fun BottomActionBar(
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             GlassButton(
-                text = if (showApplyMenu) "收起" else "全部应用…",
+                text = if (showApplyMenu) "收起" else "套模板",
                 onClick = { showApplyMenu = !showApplyMenu },
                 enabled = ready,
                 modifier = Modifier.weight(1f),
             )
             GlassButton(
-                text = if (ready) "导出全部" else "加载中…",
+                text = if (ready) "导出 $count" else "加载中",
                 accent = true,
                 onClick = onExportAll,
                 enabled = ready,
-                modifier = Modifier.weight(1.4f),
+                modifier = Modifier.weight(1.5f),
             )
         }
     }

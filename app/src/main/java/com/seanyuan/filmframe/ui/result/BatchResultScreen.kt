@@ -160,21 +160,24 @@ fun BatchResultScreen(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             GlassButton(
-                text = "返回首页",
+                text = "首页",
                 onClick = onHome,
                 modifier = Modifier.weight(1f),
+                compact = true,
             )
             GlassButton(
-                text = "分享全部",
+                text = "分享",
                 onClick = { shareBatch(context, summary.savedUris) },
                 modifier = Modifier.weight(1f),
                 enabled = summary.savedUris.isNotEmpty(),
+                compact = true,
             )
             GlassButton(
-                text = "再选一批",
+                text = "再选",
                 accent = true,
                 onClick = onAnother,
                 modifier = Modifier.weight(1f),
+                compact = true,
             )
         }
     }

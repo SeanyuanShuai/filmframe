@@ -26,7 +26,6 @@ import com.seanyuan.filmframe.ui.batch.BatchScreen
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.home.HomeScreen
 import com.seanyuan.filmframe.ui.picker.PhotoPickerScreen
-import com.seanyuan.filmframe.ui.picker.PickerMode
 import com.seanyuan.filmframe.ui.result.BatchResultScreen
 import com.seanyuan.filmframe.ui.result.BatchResultSummary
 import com.seanyuan.filmframe.ui.result.ResultScreen
@@ -37,8 +36,7 @@ import com.seanyuan.filmframe.ui.theme.FilmFrameTheme
 private sealed interface Route {
     val depth: Int
     data object Home : Route { override val depth = 0 }
-    data object PickerSingle : Route { override val depth = 1 }
-    data object PickerMulti : Route { override val depth = 1 }
+    data object Picker : Route { override val depth = 1 }
     data class Batch(val uris: List<Uri>) : Route { override val depth = 2 }
     data object Settings : Route { override val depth = 2 }
     data class Result(val summary: ResultSummary) : Route { override val depth = 3 }
@@ -92,27 +90,24 @@ private fun AppRoot(modifier: Modifier = Modifier) {
             Route.Home -> HomeScreen(
                 initialUri = pendingPickedUri,
                 onConsumeInitialUri = { pendingPickedUri = null },
-                onRequestPickSingle = { route = Route.PickerSingle },
-                onRequestPickMulti = { route = Route.PickerMulti },
+                onRequestPick = { route = Route.Picker },
                 onSettings = { route = Route.Settings },
                 onResult = { route = Route.Result(it) },
+                onOpenSavedExhibit = { exhibitSummary -> route = Route.Result(exhibitSummary) },
                 modifier = Modifier.fillMaxSize(),
             )
-            Route.PickerSingle -> PhotoPickerScreen(
-                mode = PickerMode.Single,
+            Route.Picker -> PhotoPickerScreen(
                 onBack = { route = Route.Home },
-                onPickSingle = { uri ->
-                    pendingPickedUri = uri
-                    route = Route.Home
+                onConfirm = { uris ->
+                    when {
+                        uris.isEmpty() -> route = Route.Home
+                        uris.size == 1 -> {
+                            pendingPickedUri = uris.first()
+                            route = Route.Home
+                        }
+                        else -> route = Route.Batch(uris)
+                    }
                 },
-                onPickMulti = { },
-                modifier = Modifier.fillMaxSize(),
-            )
-            Route.PickerMulti -> PhotoPickerScreen(
-                mode = PickerMode.Multi,
-                onBack = { route = Route.Home },
-                onPickSingle = { },
-                onPickMulti = { uris -> route = Route.Batch(uris) },
                 modifier = Modifier.fillMaxSize(),
             )
             is Route.Batch -> BatchScreen(
@@ -128,15 +123,19 @@ private fun AppRoot(modifier: Modifier = Modifier) {
             is Route.Result -> ResultScreen(
                 summary = r.summary,
                 onHome = { route = Route.Home },
-                onAnother = {
-                    route = Route.PickerSingle
+                onAnother = { route = Route.Picker },
+                onRetemplate = r.summary.sourceUri?.let {
+                    {
+                        pendingPickedUri = it
+                        route = Route.Home
+                    }
                 },
                 modifier = Modifier.fillMaxSize(),
             )
             is Route.BatchResult -> BatchResultScreen(
                 summary = r.summary,
                 onHome = { route = Route.Home },
-                onAnother = { route = Route.PickerMulti },
+                onAnother = { route = Route.Picker },
                 modifier = Modifier.fillMaxSize(),
             )
         }
