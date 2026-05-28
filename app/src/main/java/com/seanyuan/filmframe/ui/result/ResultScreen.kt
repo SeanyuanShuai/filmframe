@@ -75,6 +75,9 @@ fun ResultScreen(
     val context = LocalContext.current
     var chromeVisible by remember { mutableStateOf(true) }
     val previewBitmap = summary.previewBitmap?.asImageBitmap()
+    // When opened from Landing's "recent works" we have no in-memory bitmap.
+    // Fall back to Coil-loading the saved file so the screen still has content.
+    val useCoilFallback = previewBitmap == null
 
     BackHandler { onHome() }
 
@@ -88,15 +91,18 @@ fun ResultScreen(
             ) { chromeVisible = !chromeVisible },
     ) {
         // Blurred backdrop (gives "photo extends edge-to-edge" feel)
-        previewBitmap?.let {
-            Image(
-                bitmap = it,
+        when {
+            previewBitmap != null -> Image(
+                bitmap = previewBitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(60.dp)
-                    .alpha(0.45f),
+                modifier = Modifier.fillMaxSize().blur(60.dp).alpha(0.45f),
+            )
+            useCoilFallback -> coil3.compose.AsyncImage(
+                model = summary.savedUri,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().blur(60.dp).alpha(0.45f),
             )
         }
         // Soft vignette darken
@@ -107,14 +113,18 @@ fun ResultScreen(
         )
 
         // Foreground sharp photo, slightly inset for "framed" feel
-        previewBitmap?.let {
-            Image(
-                bitmap = it,
+        when {
+            previewBitmap != null -> Image(
+                bitmap = previewBitmap,
                 contentDescription = null,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 18.dp, vertical = 96.dp),
+                modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 96.dp),
+            )
+            useCoilFallback -> coil3.compose.AsyncImage(
+                model = summary.savedUri,
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp, vertical = 96.dp),
             )
         }
 
@@ -145,7 +155,10 @@ fun ResultScreen(
                         )
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "已保存 · ${summary.templateName}",
+                            // Hide the template suffix when viewing a saved exhibit
+                            // (no in-session template metadata; templateName is a placeholder).
+                            if (summary.sourceUri == null) "已保存"
+                            else "已保存 · ${summary.templateName}",
                             color = GlassColors.OnSurface,
                             fontWeight = FontWeight.Medium,
                             style = MaterialTheme.typography.bodySmall,
@@ -174,9 +187,12 @@ fun ResultScreen(
                     shape = RoundedCornerShape(20.dp),
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        MetaRow("格式", summary.outputFormat)
-                        MetaRow("尺寸", "${summary.outputWidth} × ${summary.outputHeight}")
-                        MetaRow("画质", summary.quality)
+                        // Hide "—" rows when viewing a saved exhibit (no in-session metadata).
+                        if (summary.outputFormat != "—") MetaRow("格式", summary.outputFormat)
+                        if (summary.outputWidth > 0 && summary.outputHeight > 0) {
+                            MetaRow("尺寸", "${summary.outputWidth} × ${summary.outputHeight}")
+                        }
+                        if (summary.quality != "—") MetaRow("画质", summary.quality)
                         if (summary.downsampled && summary.originalWidth > 0) {
                             MetaRow(
                                 "原图",

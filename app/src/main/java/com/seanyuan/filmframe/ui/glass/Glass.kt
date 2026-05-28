@@ -228,7 +228,7 @@ fun GlassButton(
     GlassButton(onClick = onClick, modifier = modifier, enabled = enabled, accent = accent, compact = compact) {
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyLarge,
+            style = if (compact) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
             fontWeight = if (accent) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
             softWrap = false,
