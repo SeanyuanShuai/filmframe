@@ -45,7 +45,7 @@ enum class ExportQuality(
     val forceJpeg: Boolean,
     val jpegQuality: Int,
 ) {
-    Original("原画", "保留原图格式与全部像素", Int.MAX_VALUE, false, 100),
+    Original("原画", "全部像素 · JPEG 100 重编码", Int.MAX_VALUE, false, 100),
     High("高", "长边 4096 · 保留原图格式", 4096, false, 95),
     Medium("中", "长边 2800 · JPEG 92 · 适合社交", 2800, true, 92),
     Low("低", "长边 2000 · JPEG 85 · 体积更小", 2000, true, 85);

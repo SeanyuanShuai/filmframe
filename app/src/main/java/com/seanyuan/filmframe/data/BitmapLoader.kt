@@ -41,7 +41,10 @@ object BitmapLoader {
         }
         for (cap in targets) {
             try {
-                val loaded = loadSampled(context, uri, cap)
+                // exact = true so High/Medium/Low respect their maxLongEdge cap
+                // precisely. Original passes Int.MAX_VALUE; the rescale branch is a
+                // no-op there because no real bitmap exceeds MAX_VALUE.
+                val loaded = loadSampled(context, uri, cap, exact = true)
                 if (loaded != null) return loaded
             } catch (_: OutOfMemoryError) {
                 // try a smaller cap

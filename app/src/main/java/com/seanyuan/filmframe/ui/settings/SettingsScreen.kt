@@ -104,6 +104,14 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "JPEG 是有损格式，重编码后文件体积通常比原图小 30-50%。" +
+                    "像素与可见画质不变；要做到位级无损请用 PNG 源或导出后人工换 WEBP。",
+                color = GlassColors.OnSurfaceFaint,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 4.dp),
+            )
 
             Spacer(Modifier.height(24.dp))
             SectionTitle("原图处理")
