@@ -26,6 +26,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.ui.glass.GlassButton
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.glass.GlassSurface
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -58,6 +60,18 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val autoRemoveFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
 
     var draftWatermark by remember(watermark) { mutableStateOf(watermark) }
+
+    // Auto-save watermark draft with 400 ms debounce — covers typing in
+    // the text field without a write storm. Prior behavior lost text if the
+    // user pressed system back instead of the explicit save button.
+    LaunchedEffect(draftWatermark) {
+        if (draftWatermark == watermark) return@LaunchedEffect
+        delay(400)
+        Settings.updateWatermark(
+            context,
+            draftWatermark.copy(text = draftWatermark.text.trim()),
+        )
+    }
 
     Box(
         modifier = modifier
@@ -198,17 +212,12 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
-            GlassButton(
-                text = "保存水印 & 返回",
-                accent = true,
-                onClick = {
-                    scope.launch {
-                        Settings.updateWatermark(context, draftWatermark.copy(text = draftWatermark.text.trim()))
-                        onBack()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "所有改动自动保存。",
+                color = GlassColors.OnSurfaceFaint,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(start = 4.dp),
             )
             Spacer(Modifier.height(40.dp))
         }

@@ -91,22 +91,34 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
     var resultMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uris) {
+        // Source @ 360 px → output @ ~410 px → ~0.65 MB per ARGB bitmap.
+        // 5 templates × 30 images = ~100 MB peak instead of the earlier
+        // ~525 MB at 900 px, while still being 1:1 with our 120dp tiles
+        // on 3x density screens. Visually unchanged, dramatically safer.
+        val previewSourceDim = 360
         uris.forEachIndexed { idx, uri ->
-            withContext(Dispatchers.IO) {
-                val processed = FrameProcessor.loadAndAnalyze(context, uri, targetMaxDim = 900)
-                    ?: return@withContext
-                val previews = FrameRenderer.all.associate { template ->
-                    template.id to FrameProcessor.render(
-                        context, processed, template,
-                        stripExistingFrame = processed.detection.hasFrame,
-                        watermark = watermark,
+            try {
+                withContext(Dispatchers.IO) {
+                    val processed = FrameProcessor.loadAndAnalyze(
+                        context, uri, targetMaxDim = previewSourceDim,
+                    ) ?: return@withContext
+                    val previews = FrameRenderer.all.associate { template ->
+                        template.id to FrameProcessor.render(
+                            context, processed, template,
+                            stripExistingFrame = processed.detection.hasFrame,
+                            watermark = watermark,
+                        )
+                    }
+                    items[idx] = items[idx].copy(
+                        processed = processed,
+                        templatePreviews = previews,
+                        stripFrame = processed.detection.hasFrame && autoRemoveExistingFrame,
                     )
+                    loadingDone++
                 }
-                items[idx] = items[idx].copy(
-                    processed = processed,
-                    templatePreviews = previews,
-                    stripFrame = processed.detection.hasFrame && autoRemoveExistingFrame,
-                )
+            } catch (oom: OutOfMemoryError) {
+                // Skip this item's previews on OOM; export pipeline still works
+                // because it re-loads at export time.
                 loadingDone++
             }
         }

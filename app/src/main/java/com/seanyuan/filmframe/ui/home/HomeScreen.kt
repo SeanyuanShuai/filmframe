@@ -76,6 +76,7 @@ import com.seanyuan.filmframe.ui.glass.GlassSurface
 import com.seanyuan.filmframe.ui.params.TemplateParamsPanel
 import com.seanyuan.filmframe.ui.result.ResultSummary
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -137,22 +138,32 @@ fun HomeScreen(
     LaunchedEffect(watermark, currentTemplate, adjustments, stripFrameChoice, sourceBitmap) {
         val template = currentTemplate ?: return@LaunchedEffect
         val src = sourceBitmap ?: return@LaunchedEffect
-        val out = withContext(Dispatchers.Default) {
-            val processed = ProcessedSource(
-                source = src,
-                exif = exif ?: PhotoExif(),
-                detection = frameResult ?: FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), 0, 0f),
-            )
-            FrameProcessor.render(
-                context = context,
-                processed = processed,
-                template = template,
-                stripExistingFrame = stripFrameChoice,
-                watermark = watermark,
-                adjustments = adjustments,
-            )
+        // Debounce — when user drags a slider, keys mutate at 60Hz and each
+        // change cancels the previous LaunchedEffect coroutine. The delay
+        // here gives the gesture time to settle so we don't kick off a
+        // 50-150 ms bitmap render per drag tick. Cancellation flips to a
+        // suspension point at delay(), so in-flight renders abort cheaply.
+        delay(80)
+        val out = try {
+            withContext(Dispatchers.Default) {
+                val processed = ProcessedSource(
+                    source = src,
+                    exif = exif ?: PhotoExif(),
+                    detection = frameResult ?: FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), 0, 0f),
+                )
+                FrameProcessor.render(
+                    context = context,
+                    processed = processed,
+                    template = template,
+                    stripExistingFrame = stripFrameChoice,
+                    watermark = watermark,
+                    adjustments = adjustments,
+                )
+            }
+        } catch (oom: OutOfMemoryError) {
+            null
         }
-        rendered = out
+        if (out != null) rendered = out
     }
 
     fun pickTemplate(template: FrameTemplate) {
@@ -170,17 +181,37 @@ fun HomeScreen(
         processing = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                val full = FrameProcessor.loadFullForExport(context, uri, q.maxLongEdge)
-                    ?: return@withContext null
-                val out = FrameProcessor.render(
-                    context = context,
-                    processed = full,
-                    template = template,
-                    stripExistingFrame = strip,
-                    watermark = w,
-                    adjustments = adj,
-                )
-                ImageExporter.saveToGallery(context, out, uri, full.loaded, q)
+                // BitmapLoader.loadForExport already steps the source cap down
+                // on OOM. The output bitmap allocation (~1.15x source area) is
+                // a separate OOM surface — wrap the render+save in a retry
+                // that halves the cap on failure.
+                var cap = q.maxLongEdge
+                repeat(3) { attempt ->
+                    val full = try {
+                        FrameProcessor.loadFullForExport(context, uri, cap)
+                    } catch (_: OutOfMemoryError) {
+                        null
+                    } ?: run {
+                        cap = (cap / 2).coerceAtLeast(1024)
+                        return@repeat
+                    }
+                    try {
+                        val out = FrameProcessor.render(
+                            context = context,
+                            processed = full,
+                            template = template,
+                            stripExistingFrame = strip,
+                            watermark = w,
+                            adjustments = adj,
+                        )
+                        return@withContext ImageExporter.saveToGallery(
+                            context, out, uri, full.loaded, q,
+                        )
+                    } catch (_: OutOfMemoryError) {
+                        cap = (cap / 2).coerceAtLeast(1024)
+                    }
+                }
+                null
             }
             processing = false
             if (result != null) {

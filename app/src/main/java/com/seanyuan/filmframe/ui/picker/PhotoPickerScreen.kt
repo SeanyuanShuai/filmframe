@@ -1,9 +1,11 @@
 package com.seanyuan.filmframe.ui.picker
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings as AndroidSettings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -85,9 +87,13 @@ fun PhotoPickerScreen(
             context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
         )
     }
+    var requestedOnce by remember { mutableStateOf(false) }
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { result -> granted = result }
+    ) { result ->
+        granted = result
+        requestedOnce = true
+    }
 
     LaunchedEffect(Unit) {
         if (!granted) permissionLauncher.launch(permission)
@@ -134,7 +140,15 @@ fun PhotoPickerScreen(
 
             if (!granted) {
                 PermissionPrompt(
+                    showSettingsFallback = requestedOnce,
                     onRequest = { permissionLauncher.launch(permission) },
+                    onOpenSettings = {
+                        val intent = Intent(
+                            AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        context.startActivity(intent)
+                    },
                 )
             } else {
                 LazyVerticalGrid(
@@ -274,7 +288,11 @@ private fun PhotoCell(
 }
 
 @Composable
-private fun PermissionPrompt(onRequest: () -> Unit) {
+private fun PermissionPrompt(
+    showSettingsFallback: Boolean,
+    onRequest: () -> Unit,
+    onOpenSettings: () -> Unit,
+) {
     Box(
         modifier = Modifier.fillMaxSize().padding(28.dp),
         contentAlignment = Alignment.Center,
@@ -303,6 +321,20 @@ private fun PermissionPrompt(onRequest: () -> Unit) {
                     onClick = onRequest,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                if (showSettingsFallback) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(
+                        "如果系统不再弹出授权请求，请去系统设置手动开启。",
+                        color = GlassColors.OnSurfaceFaint,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    GlassButton(
+                        text = "去系统设置",
+                        onClick = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }
