@@ -23,7 +23,7 @@ data class LoadedBitmap(
 object BitmapLoader {
 
     fun loadForAnalysis(context: Context, uri: Uri, targetMaxDim: Int = 1200): Bitmap? =
-        loadSampled(context, uri, targetMaxDim)?.bitmap
+        loadSampled(context, uri, targetMaxDim, exact = true)?.bitmap
 
     /**
      * For export: try the requested cap first, fall back to ever-smaller caps
@@ -50,7 +50,12 @@ object BitmapLoader {
         return null
     }
 
-    private fun loadSampled(context: Context, uri: Uri, targetMaxDim: Int): LoadedBitmap? {
+    private fun loadSampled(
+        context: Context,
+        uri: Uri,
+        targetMaxDim: Int,
+        exact: Boolean = false,
+    ): LoadedBitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         runCatching {
             context.contentResolver.openInputStream(uri)?.use {
@@ -62,9 +67,14 @@ object BitmapLoader {
         val maxDim = max(originalW, originalH)
         if (maxDim <= 0) return null
 
+        // Pick the smallest power-of-two sample that keeps decoded dim >= target.
+        // We deliberately decode slightly larger than target so the subsequent
+        // exact rescale can downsample with a real filter — a power-of-two
+        // inSampleSize that lands BELOW target leaves the preview blurry on
+        // hi-density screens (the original v1 bug).
         var sample = 1
-        while (maxDim / sample > targetMaxDim) sample *= 2
-        val downsampled = sample > 1
+        while (maxDim / (sample * 2) >= targetMaxDim) sample *= 2
+        val downsampled = maxDim > targetMaxDim
 
         val opts = BitmapFactory.Options().apply {
             inSampleSize = sample
@@ -77,8 +87,29 @@ object BitmapLoader {
         }.getOrNull() ?: return null
 
         val rotated = applyExifRotation(context, uri, raw)
+
+        // Exact rescale for preview path: turns the always-slightly-too-large
+        // decoded bitmap into exactly targetMaxDim on its long edge using a
+        // bilinear filter. Skipped for export (exact=false) — there we want
+        // the largest possible decode, not a scaled-down preview.
+        val finalBmp = if (exact && max(rotated.width, rotated.height) > targetMaxDim) {
+            val srcMax = max(rotated.width, rotated.height)
+            val scale = targetMaxDim.toFloat() / srcMax
+            val nw = max(1, (rotated.width * scale).toInt())
+            val nh = max(1, (rotated.height * scale).toInt())
+            try {
+                Bitmap.createScaledBitmap(rotated, nw, nh, true).also {
+                    if (it !== rotated) rotated.recycle()
+                }
+            } catch (_: OutOfMemoryError) {
+                rotated
+            }
+        } else {
+            rotated
+        }
+
         return LoadedBitmap(
-            bitmap = rotated,
+            bitmap = finalBmp,
             originalWidth = originalW,
             originalHeight = originalH,
             downsampled = downsampled,

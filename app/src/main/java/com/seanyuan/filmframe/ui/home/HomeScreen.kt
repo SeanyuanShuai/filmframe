@@ -146,7 +146,7 @@ fun HomeScreen(
     LaunchedEffect(selectedUri) {
         val uri = selectedUri ?: return@LaunchedEffect
         val bmp = withContext(Dispatchers.IO) {
-            BitmapLoader.loadForAnalysis(context, uri, targetMaxDim = 1600)
+            BitmapLoader.loadForAnalysis(context, uri, targetMaxDim = 2400)
         }
         sourceBitmap = bmp
         val detection = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }

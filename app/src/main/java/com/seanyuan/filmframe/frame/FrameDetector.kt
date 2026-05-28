@@ -50,17 +50,29 @@ data class FrameDetectionResult(
  */
 object FrameDetector {
 
-    private const val MAX_ANALYSIS_DIM = 600
+    private const val MAX_ANALYSIS_DIM = 900
     private const val PER_CHANNEL_TOLERANCE = 22
     private const val STRICT_ROW_THRESHOLD = 0.92f
     private const val STRICT_MISS_TOLERANCE = 3
-    private const val LOOSE_ROW_THRESHOLD = 0.75f
-    private const val LOOSE_MISS_TOLERANCE = 10
+    private const val LOOSE_ROW_THRESHOLD = 0.70f
+    // Adaptive: loose pass tolerates min(MAX, strict_inset / DIVISOR) consecutive
+    // misses. A HASSELBLAD bottom mat (~200 analysis rows) gets ~50-row tolerance
+    // so a single text line doesn't cut the walk short. A thin polaroid frame
+    // (~20 rows) still uses the FLOOR (10) so we don't run away.
+    private const val LOOSE_MISS_TOLERANCE_FLOOR = 10
+    private const val LOOSE_MISS_TOLERANCE_DIVISOR = 4
+    private const val LOOSE_MISS_TOLERANCE_MAX = 80
     private const val MIN_FRAME_RATIO = 0.012f  // 1.2% of dim — typical real frames are >5%
     private const val CORNER_SAMPLE_FRACTION = 0.05f
     private const val CORNER_INTRA_VARIANCE_LIMIT = 18
-    private const val LOOSE_OVER_STRICT_CAP = 3f
-    private const val SAFETY_INSET_RATIO = 0.006f
+    // Increased from 3× — text-heavy HASSELBLAD mats break strict pass early,
+    // so loose has to extend further. Still bounded so a near-uniform photo
+    // (snow, dark sky) doesn't get cropped in half.
+    private const val LOOSE_OVER_STRICT_CAP = 6f
+    // 1.2% safety margin — at typical export 6000px long edge this is 72px,
+    // enough to cover 1-2 analysis-px detection error (= 10-20 source px) plus
+    // AA fringe. Was 0.6% which left a hairline residual on dogfood.
+    private const val SAFETY_INSET_RATIO = 0.012f
     private const val MAX_INSET_RATIO = 0.5f
 
     /**
@@ -136,14 +148,20 @@ object FrameDetector {
         }
 
         // LOOSE pass — extend past text bands / AA fringe.
+        // Per-side adaptive miss tolerance: a thicker strict result implies a
+        // thicker real frame that may contain longer non-matching text rows.
+        val tolTop = looseMissTol(strictTop)
+        val tolBottom = looseMissTol(strictBottom)
+        val tolLeft = looseMissTol(strictLeft)
+        val tolRight = looseMissTol(strictRight)
         val looseTop = walkVertical(pixels, w, h, frameColor, fromTop = true,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+            threshold = LOOSE_ROW_THRESHOLD, missTol = tolTop)
         val looseBottom = walkVertical(pixels, w, h, frameColor, fromTop = false,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+            threshold = LOOSE_ROW_THRESHOLD, missTol = tolBottom)
         val looseLeft = walkHorizontal(pixels, w, h, frameColor, fromLeft = true,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+            threshold = LOOSE_ROW_THRESHOLD, missTol = tolLeft)
         val looseRight = walkHorizontal(pixels, w, h, frameColor, fromLeft = false,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = LOOSE_MISS_TOLERANCE)
+            threshold = LOOSE_ROW_THRESHOLD, missTol = tolRight)
 
         // Cap loose by strict×3 to prevent runaway into photo content.
         val topInset = min(looseTop, (strictTop * LOOSE_OVER_STRICT_CAP).toInt())
@@ -169,6 +187,11 @@ object FrameDetector {
             frameColor = frameColor,
             confidence = confidence,
         )
+    }
+
+    private fun looseMissTol(strictInset: Int): Int {
+        val adaptive = strictInset / LOOSE_MISS_TOLERANCE_DIVISOR
+        return adaptive.coerceIn(LOOSE_MISS_TOLERANCE_FLOOR, LOOSE_MISS_TOLERANCE_MAX)
     }
 
     private fun downsample(source: Bitmap): Bitmap {
