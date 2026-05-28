@@ -27,6 +27,8 @@ import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.home.HomeScreen
 import com.seanyuan.filmframe.ui.picker.PhotoPickerScreen
 import com.seanyuan.filmframe.ui.picker.PickerMode
+import com.seanyuan.filmframe.ui.result.BatchResultScreen
+import com.seanyuan.filmframe.ui.result.BatchResultSummary
 import com.seanyuan.filmframe.ui.result.ResultScreen
 import com.seanyuan.filmframe.ui.result.ResultSummary
 import com.seanyuan.filmframe.ui.settings.SettingsScreen
@@ -40,6 +42,7 @@ private sealed interface Route {
     data class Batch(val uris: List<Uri>) : Route { override val depth = 2 }
     data object Settings : Route { override val depth = 2 }
     data class Result(val summary: ResultSummary) : Route { override val depth = 3 }
+    data class BatchResult(val summary: BatchResultSummary) : Route { override val depth = 3 }
 }
 
 class MainActivity : ComponentActivity() {
@@ -115,6 +118,7 @@ private fun AppRoot(modifier: Modifier = Modifier) {
             is Route.Batch -> BatchScreen(
                 uris = r.uris,
                 onBack = { route = Route.Home },
+                onResult = { route = Route.BatchResult(it) },
                 modifier = Modifier.fillMaxSize(),
             )
             Route.Settings -> SettingsScreen(
@@ -127,6 +131,12 @@ private fun AppRoot(modifier: Modifier = Modifier) {
                 onAnother = {
                     route = Route.PickerSingle
                 },
+                modifier = Modifier.fillMaxSize(),
+            )
+            is Route.BatchResult -> BatchResultScreen(
+                summary = r.summary,
+                onHome = { route = Route.Home },
+                onAnother = { route = Route.PickerMulti },
                 modifier = Modifier.fillMaxSize(),
             )
         }

@@ -73,6 +73,7 @@ import com.seanyuan.filmframe.ui.common.ProcessingOverlay
 import com.seanyuan.filmframe.ui.glass.GlassButton
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.glass.GlassSurface
+import com.seanyuan.filmframe.ui.result.BatchResultSummary
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,7 +89,12 @@ private data class BatchItem(
 )
 
 @Composable
-fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun BatchScreen(
+    uris: List<Uri>,
+    onBack: () -> Unit,
+    onResult: (BatchResultSummary) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
@@ -103,7 +109,6 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
     }
     var loadingDone by remember { mutableIntStateOf(0) }
     var exportProgress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
-    var resultMsg by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uris) {
         // 360px source → ~410px output → ~0.65MB per ARGB bitmap.
@@ -199,25 +204,40 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
                 onExportAll = {
                     scope.launch {
                         exportProgress = 0 to items.size
-                        var successCount = 0
+                        val savedUris = mutableListOf<Uri>()
+                        val templateNames = mutableListOf<String>()
                         items.forEachIndexed { i, item ->
-                            val ok = withContext(Dispatchers.IO) {
+                            val savedUri = withContext(Dispatchers.IO) {
                                 val full = FrameProcessor.loadFullForExport(
                                     context, item.uri, exportQuality.maxLongEdge,
-                                ) ?: return@withContext false
+                                ) ?: return@withContext null
                                 val template = FrameRenderer.byId(item.selectedTemplateId)
                                 val rendered = FrameProcessor.render(
                                     context, full, template, item.stripFrame,
                                     watermark = watermark,
                                 )
-                                ImageExporter.saveToGallery(context, rendered, item.uri, full.loaded, exportQuality) != null
+                                ImageExporter.saveToGallery(
+                                    context, rendered, item.uri, full.loaded, exportQuality,
+                                )?.uri
                             }
-                            if (ok) successCount++
+                            if (savedUri != null) {
+                                savedUris += savedUri
+                                templateNames += FrameRenderer
+                                    .byId(item.selectedTemplateId).displayName
+                            }
                             exportProgress = (i + 1) to items.size
-                            items[i] = items[i].copy(exported = ok)
+                            items[i] = items[i].copy(exported = savedUri != null)
                         }
                         exportProgress = null
-                        resultMsg = "✓ $successCount / ${items.size} 张已保存到 Pictures/FilmFrame"
+                        onResult(
+                            BatchResultSummary(
+                                savedUris = savedUris,
+                                thumbnails = items.map { it.templatePreviews[it.selectedTemplateId] },
+                                totalRequested = items.size,
+                                templateNames = templateNames,
+                                quality = exportQuality.displayName,
+                            )
+                        )
                     }
                 },
             )
@@ -232,25 +252,6 @@ fun BatchScreen(uris: List<Uri>, onBack: () -> Unit, modifier: Modifier = Modifi
             )
         }
 
-        resultMsg?.let { msg ->
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { resultMsg = null },
-                title = { Text("批处理完成", color = GlassColors.OnSurface) },
-                text = { Text(msg, color = GlassColors.OnSurfaceMuted) },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(onClick = {
-                        resultMsg = null
-                        onBack()
-                    }) { Text("返回首页") }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { resultMsg = null }) {
-                        Text("留下继续看")
-                    }
-                },
-                containerColor = Color(0xFF1A1A1A),
-            )
-        }
     }
 }
 

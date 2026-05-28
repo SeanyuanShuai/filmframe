@@ -20,11 +20,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -92,6 +94,8 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             TopBar(onBack = onBack)
             Spacer(Modifier.height(24.dp))
 
+            var showOriginalInfo by remember { mutableStateOf(false) }
+
             SectionTitle("画质")
             GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(vertical = 6.dp)) {
@@ -100,18 +104,36 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                             quality = quality,
                             selected = quality == exportQuality,
                             onClick = { scope.launch { Settings.updateExportQuality(context, quality) } },
+                            onInfoClick = if (quality == ExportQuality.Original) {
+                                { showOriginalInfo = true }
+                            } else null,
                         )
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "JPEG 是有损格式，重编码后文件体积通常比原图小 30-50%。" +
-                    "像素与可见画质不变；要做到位级无损请用 PNG 源或导出后人工换 WEBP。",
-                color = GlassColors.OnSurfaceFaint,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
+
+            if (showOriginalInfo) {
+                AlertDialog(
+                    onDismissRequest = { showOriginalInfo = false },
+                    title = { Text("为什么文件比原图小？", color = GlassColors.OnSurface) },
+                    text = {
+                        Text(
+                            "原画保留全部像素，但 JPEG 是有损格式，重新编码必定会比相机原始 JPEG 小 30-50%。\n\n" +
+                                "Android 的 JPEG 编码器即使 quality=100 也会做色度子采样（4:2:0），" +
+                                "OPPO/小米/Apple 相机直出的 JPEG 通常用更宽松的子采样（4:4:4），所以体积更大。\n\n" +
+                                "像素数量和可见画质完全不变。要做到字节级无损，需要源图是 PNG 或 WEBP。",
+                            color = GlassColors.OnSurfaceMuted,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showOriginalInfo = false }) {
+                            Text("知道了", color = GlassColors.Accent)
+                        }
+                    },
+                    containerColor = Color(0xFF1A1A1A),
+                )
+            }
 
             Spacer(Modifier.height(24.dp))
             SectionTitle("原图处理")
@@ -240,6 +262,7 @@ private fun QualityRow(
     quality: ExportQuality,
     selected: Boolean,
     onClick: () -> Unit,
+    onInfoClick: (() -> Unit)? = null,
 ) {
     val bg = if (selected) GlassColors.AccentSoft else Color.Transparent
     Row(
@@ -251,12 +274,33 @@ private fun QualityRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                quality.displayName,
-                color = if (selected) GlassColors.Accent else GlassColors.OnSurface,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    quality.displayName,
+                    color = if (selected) GlassColors.Accent else GlassColors.OnSurface,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                )
+                onInfoClick?.let { info ->
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .height(20.dp)
+                            .width(20.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .border(0.8.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                            .clickable(onClick = info),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "?",
+                            color = GlassColors.OnSurfaceMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
             Text(
                 quality.subtitle,
                 color = GlassColors.OnSurfaceFaint,
