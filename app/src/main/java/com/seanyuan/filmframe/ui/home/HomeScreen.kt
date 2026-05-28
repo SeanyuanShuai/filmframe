@@ -34,8 +34,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -148,7 +152,7 @@ fun HomeScreen(
     LaunchedEffect(selectedUri) {
         val uri = selectedUri ?: return@LaunchedEffect
         val bmp = withContext(Dispatchers.IO) {
-            BitmapLoader.loadForAnalysis(context, uri, targetMaxDim = 2400)
+            BitmapLoader.loadForAnalysis(context, uri, targetMaxDim = 3200)
         }
         sourceBitmap = bmp
         val detection = bmp?.let { withContext(Dispatchers.Default) { FrameDetector.detect(it) } }
@@ -261,6 +265,9 @@ fun HomeScreen(
             HomeTopBar(
                 watermarkActive = watermark.active,
                 onSettings = onSettings,
+                editorMode = selectedUri != null,
+                canSave = currentTemplate != null,
+                onSave = ::exportFullRes,
             )
 
             Crossfade(
@@ -285,7 +292,6 @@ fun HomeScreen(
                         onSelectTemplate = ::pickTemplate,
                         onPickAnother = onRequestPick,
                         onToggleParams = { showParams = !showParams },
-                        onExport = ::exportFullRes,
                         paramsOpen = showParams,
                     )
                 }
@@ -311,13 +317,19 @@ fun HomeScreen(
         ProcessingOverlay(
             visible = processing,
             title = "导出中",
-            subtitle = "渲染并写入 Pictures/FilmFrame · ${exportQuality.displayName}",
+            subtitle = "渲染并写入 Pictures/JustFrame · ${exportQuality.displayName}",
         )
     }
 }
 
 @Composable
-private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
+private fun HomeTopBar(
+    watermarkActive: Boolean,
+    onSettings: () -> Unit,
+    editorMode: Boolean = false,
+    canSave: Boolean = false,
+    onSave: () -> Unit = {},
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -326,14 +338,14 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "FilmFrame",
+            "JustFrame",
             color = GlassColors.OnSurface,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f),
         )
         AnimatedVisibility(
-            visible = watermarkActive,
+            visible = watermarkActive && !editorMode,
             enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
             exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 }),
         ) {
@@ -354,15 +366,27 @@ private fun HomeTopBar(watermarkActive: Boolean, onSettings: () -> Unit) {
                 Spacer(Modifier.width(10.dp))
             }
         }
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.07f))
-                .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                .clickable(onClick = onSettings)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        ) {
-            Text("设置", color = GlassColors.OnSurface, style = MaterialTheme.typography.bodyMedium)
+        if (editorMode) {
+            // Save lives in the top-right while editing — keeps the bottom row
+            // available for purely editing-context actions (换一张 / 调整).
+            GlassButton(
+                text = "保存",
+                onClick = onSave,
+                enabled = canSave,
+                accent = true,
+                compact = true,
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                    .clickable(onClick = onSettings)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text("设置", color = GlassColors.OnSurface, style = MaterialTheme.typography.bodyMedium)
+            }
         }
     }
 }
@@ -412,51 +436,133 @@ private fun LandingPanel(
         loaded = true
     }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-    ) {
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Gallery 级的胶卷边框",
-            color = GlassColors.OnSurfaceMuted,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            "本地处理 · EXIF 自动识别",
-            color = GlassColors.OnSurfaceFaint,
-            style = MaterialTheme.typography.bodySmall,
-        )
+    Box(modifier = Modifier.fillMaxSize()) {
+        AmbientBackdrop(modifier = Modifier.fillMaxSize())
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        ) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Gallery 级的胶卷边框",
+                color = GlassColors.OnSurfaceMuted,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "本地处理 · EXIF 自动识别",
+                color = GlassColors.OnSurfaceFaint,
+                style = MaterialTheme.typography.bodySmall,
+            )
 
-        Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(20.dp))
 
-        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            when {
-                !loaded -> Unit
-                !granted -> EmptyExhibitHint(
-                    title = "你的第一张作品",
-                    body = "选一张照片，给它一个胶卷感的边框",
-                )
-                entries.value.isEmpty() -> EmptyExhibitHint(
-                    title = "你的第一张作品",
-                    body = "选一张照片，给它一个胶卷感的边框",
-                )
-                else -> RecentWorksExhibit(
-                    entries = entries.value,
-                    onOpen = onOpenSavedExhibit,
-                )
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    !loaded -> Unit
+                    !granted -> EmptyExhibitHint(
+                        title = "还没有作品",
+                        body = "选一张照片，给它一个胶卷感的边框",
+                    )
+                    entries.value.isEmpty() -> EmptyExhibitHint(
+                        title = "还没有作品",
+                        body = "你导出的作品会展示在这里，像挂在画廊里",
+                    )
+                    else -> RecentWorksExhibit(
+                        entries = entries.value,
+                        onOpen = onOpenSavedExhibit,
+                    )
+                }
             }
-        }
 
-        Spacer(Modifier.height(20.dp))
-        GlassButton(
-            text = "选照片",
-            accent = true,
-            onClick = onPick,
-            modifier = Modifier.fillMaxWidth(),
+            Spacer(Modifier.height(20.dp))
+            GlassButton(
+                text = "选照片",
+                accent = true,
+                onClick = onPick,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/**
+ * Slow ambient gradient sweep that lives behind the Landing content. Two
+ * low-saturation radial blobs drift across the screen at very different
+ * periods so the pattern never visibly repeats. Color tokens kept dim enough
+ * (~6% alpha) that it reads as "the room has light in it" rather than
+ * decoration.
+ */
+@Composable
+private fun AmbientBackdrop(modifier: Modifier = Modifier) {
+    val transition = androidx.compose.animation.core.rememberInfiniteTransition(label = "ambient")
+    val tA by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                durationMillis = 22_000,
+                easing = androidx.compose.animation.core.LinearEasing,
+            ),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "ambientA",
+    )
+    val tB by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(
+                durationMillis = 31_000,
+                easing = androidx.compose.animation.core.LinearEasing,
+            ),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "ambientB",
+    )
+
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        // Warm low-sat highlight, drifts diagonally
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF3A2A1A).copy(alpha = 0.32f),
+                    Color.Transparent,
+                ),
+                center = androidx.compose.ui.geometry.Offset(
+                    x = w * (0.15f + tA * 0.7f),
+                    y = h * (0.2f + tA * 0.3f),
+                ),
+                radius = w * 0.95f,
+            ),
+            radius = w * 0.95f,
+            center = androidx.compose.ui.geometry.Offset(
+                x = w * (0.15f + tA * 0.7f),
+                y = h * (0.2f + tA * 0.3f),
+            ),
         )
-        Spacer(Modifier.height(12.dp))
+        // Cool deep blue, drifts opposite
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF15202E).copy(alpha = 0.40f),
+                    Color.Transparent,
+                ),
+                center = androidx.compose.ui.geometry.Offset(
+                    x = w * (0.85f - tB * 0.6f),
+                    y = h * (0.85f - tB * 0.5f),
+                ),
+                radius = w * 1.05f,
+            ),
+            radius = w * 1.05f,
+            center = androidx.compose.ui.geometry.Offset(
+                x = w * (0.85f - tB * 0.6f),
+                y = h * (0.85f - tB * 0.5f),
+            ),
+        )
     }
 }
 
@@ -488,37 +594,56 @@ private fun RecentWorksExhibit(
     entries: List<com.seanyuan.filmframe.data.GalleryEntry>,
     onOpen: (ResultSummary) -> Unit,
 ) {
-    val pagerState = androidx.compose.foundation.pager.rememberPagerState(pageCount = { entries.size })
-    val context = LocalContext.current
+    // Marquee carousel — slow continuous left-to-right drift. We multiply the
+    // entries list so the LazyRow has enough content to scroll without the
+    // edges ever showing. When the scroll position approaches end-1 list-length
+    // we silently snap back to position 0 of the next-cycle to keep it infinite.
+    val baseCount = entries.size
+    val loopCount = if (baseCount == 0) 0 else 100  // 100 cycles ≈ effectively infinite
+    val virtualCount = baseCount * loopCount
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+        initialFirstVisibleItemIndex = baseCount * (loopCount / 2),
+    )
 
     Column(modifier = Modifier.fillMaxSize()) {
         Text(
-            "最近作品 · ${entries.size}",
+            "最近作品 · $baseCount",
             color = GlassColors.OnSurfaceFaint,
             style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(bottom = 10.dp),
+            modifier = Modifier.padding(bottom = 10.dp, start = 4.dp),
         )
-        androidx.compose.foundation.pager.HorizontalPager(
-            state = pagerState,
+
+        // Auto-scroll loop: ~24 px/sec leftward via scrollBy. 60fps frame ≈ 0.4 px.
+        LaunchedEffect(listState, baseCount) {
+            if (baseCount == 0) return@LaunchedEffect
+            val frameMs = 16L
+            val pxPerFrame = 0.6f  // tune for taste — gallery slow drift
+            while (true) {
+                kotlinx.coroutines.delay(frameMs)
+                if (!listState.isScrollInProgress) {
+                    listState.scrollBy(pxPerFrame)
+                }
+            }
+        }
+
+        androidx.compose.foundation.lazy.LazyRow(
+            state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(horizontal = 28.dp),
-            pageSpacing = 16.dp,
-        ) { page ->
-            val entry = entries[page]
-            val aspect = if (entry.width > 0 && entry.height > 0) {
-                entry.width.toFloat() / entry.height
-            } else 0.7f
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            // userScrollEnabled = true lets users still take over and swipe by hand
+        ) {
+            items(virtualCount) { vi ->
+                val entry = entries[vi % baseCount]
+                val aspect = if (entry.width > 0 && entry.height > 0) {
+                    entry.width.toFloat() / entry.height
+                } else 0.7f
                 Box(
                     modifier = Modifier
                         .fillMaxHeight()
                         .aspectRatio(aspect.coerceIn(0.4f, 2.5f))
-                        .clip(RoundedCornerShape(14.dp))
+                        // No clip — galleries hang paintings with sharp edges, not
+                        // rounded poker-cards. Matches Magnum / Aperture aesthetic.
                         .background(Color(0xFF0B0B0D))
                         .clickable {
                             onOpen(
@@ -562,7 +687,6 @@ private fun EditorPanel(
     onSelectTemplate: (FrameTemplate) -> Unit,
     onPickAnother: () -> Unit,
     onToggleParams: () -> Unit,
-    onExport: () -> Unit,
     paramsOpen: Boolean,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -592,6 +716,10 @@ private fun EditorPanel(
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Fit,
+                                // High filter: trades a few % perf for visibly sharper
+                                // downscaling. Default Low (bilinear) leaves the editor
+                                // preview looking soft on 3x+ density screens.
+                                filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
                                 modifier = Modifier.fillMaxSize(),
                             )
                             selectedUri != null -> AsyncImage(
@@ -646,16 +774,9 @@ private fun EditorPanel(
                 modifier = Modifier.weight(1f),
             )
             GlassButton(
-                text = if (paramsOpen) "收起" else "调整",
+                text = if (paramsOpen) "收起调整" else "调整",
                 onClick = onToggleParams,
                 modifier = Modifier.weight(1f),
-                enabled = currentTemplate != null,
-            )
-            GlassButton(
-                text = "保存",
-                onClick = onExport,
-                modifier = Modifier.weight(1f),
-                accent = true,
                 enabled = currentTemplate != null,
             )
         }

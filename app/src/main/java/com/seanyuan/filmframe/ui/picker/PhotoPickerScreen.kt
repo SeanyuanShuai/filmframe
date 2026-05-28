@@ -311,7 +311,7 @@ private fun PermissionPrompt(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "FilmFrame 需要读取你的相册来显示照片缩略图。所有处理都在本地完成，照片不会上传任何服务器。",
+                    "JustFrame 需要读取你的相册来显示照片缩略图。所有处理都在本地完成，照片不会上传任何服务器。",
                     color = GlassColors.OnSurfaceMuted,
                     style = MaterialTheme.typography.bodyMedium,
                 )

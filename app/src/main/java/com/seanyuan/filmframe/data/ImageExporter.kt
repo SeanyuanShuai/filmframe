@@ -25,7 +25,7 @@ data class ExportResult(
 
 object ImageExporter {
 
-    private const val SUBFOLDER = "FilmFrame"
+    private const val SUBFOLDER = "JustFrame"
 
     /**
      * Output format & quality follow user's ExportQuality choice:
@@ -52,7 +52,7 @@ object ImageExporter {
             decideFormat(context, sourceUri)
         }
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
-        val filename = "FilmFrame_$timestamp.${format.ext}"
+        val filename = "JustFrame_$timestamp.${format.ext}"
 
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, filename)

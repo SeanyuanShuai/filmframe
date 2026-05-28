@@ -106,7 +106,7 @@ fun BatchResultScreen(
                 .padding(horizontal = 24.dp, vertical = 8.dp),
         ) {
             Text(
-                "已保存到 Pictures / FilmFrame",
+                "已保存到 Pictures / JustFrame",
                 color = GlassColors.OnSurface,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,

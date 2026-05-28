@@ -239,7 +239,7 @@ fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
             SectionTitle("关于")
             GlassSurface(modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    AboutRow("项目", "FilmFrame · v0.1 dev")
+                    AboutRow("项目", "JustFrame · v0.2 dev")
                     AboutRow("仓库", "github.com/SeanyuanShuai/filmframe")
                     AboutRow("字体", "Cormorant Garamond · DM Serif Display · Inter (SIL OFL)")
                 }

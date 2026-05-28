@@ -38,11 +38,15 @@ object MediaGallery {
      * back to DATA path matching (deprecated but functional).
      */
     fun listFilmFrameOutputs(context: Context, limit: Int = 12): List<GalleryEntry> {
+        // Match both Pictures/JustFrame (current) and Pictures/FilmFrame (legacy
+        // pre-rename) so dogfood users don't lose their archive at rename time.
         val (sel, args) = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?" to arrayOf("Pictures/FilmFrame/%")
+            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR ${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?" to
+                arrayOf("Pictures/JustFrame/%", "Pictures/FilmFrame/%")
         } else {
             @Suppress("DEPRECATION")
-            "${MediaStore.Images.Media.DATA} LIKE ?" to arrayOf("%/Pictures/FilmFrame/%")
+            "${MediaStore.Images.Media.DATA} LIKE ? OR ${MediaStore.Images.Media.DATA} LIKE ?" to
+                arrayOf("%/Pictures/JustFrame/%", "%/Pictures/FilmFrame/%")
         }
         return queryImages(context, limit, sel, args)
     }

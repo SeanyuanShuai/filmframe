@@ -248,7 +248,7 @@ fun BatchScreen(
             ProcessingOverlay(
                 visible = true,
                 title = "批量导出中",
-                subtitle = "正在写入 Pictures/FilmFrame",
+                subtitle = "正在写入 Pictures/JustFrame",
                 progress = it,
             )
         }
