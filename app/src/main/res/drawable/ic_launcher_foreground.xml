@@ -5,48 +5,45 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <!--
-        Adaptive icon foreground.
+        JustFrame adaptive icon foreground.
         Safe content zone is the center 66×66. Outer 21dp may be cropped to
         squircle/circle by the launcher.
 
-        Composition: a framed photo silhouette.
-            - off-white mat (FAFAFA), slightly taller bottom margin
-            - inner photo as deep slate
-            - subtle diagonal highlight (mimics glass / glossy print)
-            - 4-dot caption row (recalls EXIF · separators)
-            - tiny gold corner dot = signature/watermark hint
+        Distilled to three elements only:
+            1. Off-white photo card with bottom-heavy mat (Polaroid proportion)
+            2. Inner photo block in deep slate
+            3. Serif "J" mark engraved in the bottom mat (the "caption")
+            4. Single gold dot lower-right, signature-style
+
+        Reasoning: the previous icon stacked 5 visual elements; reads as
+        "busy" at launcher size (48×48dp on most devices). Three elements
+        with clear hierarchy give a Magnum / Aperture printed-monograph feel.
     -->
 
-    <!-- Outer photo card (white mat) -->
+    <!-- White photo card with rounded corners; bottom mat ~16 units tall -->
     <path
-        android:pathData="M30,30 L78,30 Q80,30 80,32 L80,76 Q80,78 78,78 L30,78 Q28,78 28,76 L28,32 Q28,30 30,30 Z"
-        android:fillColor="#FAFAFA"/>
+        android:pathData="M26,24 L82,24 Q84,24 84,26 L84,82 Q84,84 82,84 L26,84 Q24,84 24,82 L24,26 Q24,24 26,24 Z"
+        android:fillColor="#F5F1EA"/>
 
-    <!-- Inner photo (deep slate) -->
+    <!-- Inner photo (deep slate, slightly cool) -->
     <path
-        android:pathData="M33,33 L75,33 L75,65 L33,65 Z"
-        android:fillColor="#222B33"/>
+        android:pathData="M30,30 L78,30 L78,66 L30,66 Z"
+        android:fillColor="#1E2630"/>
 
-    <!-- Glossy highlight -->
+    <!-- Subtle horizon line inside photo for "image" feel -->
     <path
-        android:pathData="M33,33 L75,33 L48,65 L33,65 Z"
-        android:fillColor="#2E3A45"
-        android:fillAlpha="0.55"/>
+        android:pathData="M30,52 L78,52 L78,53.2 L30,53.2 Z"
+        android:fillColor="#2A3540"/>
 
-    <!-- Caption hairline -->
+    <!-- Serif "J" mark in the bottom mat —
+         constructed from a vertical stem + quarter-arc hook + top serif cap.
+         Color: warm near-black. -->
     <path
-        android:pathData="M40,69.6 L68,69.6 L68,71.0 L40,71.0 Z"
-        android:fillColor="#1A1A1A"
-        android:fillAlpha="0.65"/>
+        android:pathData="M52,71 L52,77 Q52,79.4 49.6,79.4 Q47.2,79.4 47.2,77 L48.8,77 Q48.8,78.2 49.6,78.2 Q50.4,78.2 50.4,77 L50.4,71 Z M49.4,70 L54.6,70 L54.6,71.2 L49.4,71.2 Z"
+        android:fillColor="#1A1A1A"/>
 
-    <!-- Caption second-line dots (4 dots, evenly spaced) -->
+    <!-- Gold signature dot lower-right of card -->
     <path
-        android:pathData="M44,73.6 m-1,0 a1,1 0 1,1 2,0 a1,1 0 1,1 -2,0 M51,73.6 m-1,0 a1,1 0 1,1 2,0 a1,1 0 1,1 -2,0 M58,73.6 m-1,0 a1,1 0 1,1 2,0 a1,1 0 1,1 -2,0 M65,73.6 m-1,0 a1,1 0 1,1 2,0 a1,1 0 1,1 -2,0"
-        android:fillColor="#1A1A1A"
-        android:fillAlpha="0.45"/>
-
-    <!-- Accent corner dot (watermark hint) -->
-    <path
-        android:pathData="M73,73 m-1.6,0 a1.6,1.6 0 1,1 3.2,0 a1.6,1.6 0 1,1 -3.2,0"
-        android:fillColor="#D4A24A"/>
+        android:pathData="M77,78 m-2,0 a2,2 0 1,1 4,0 a2,2 0 1,1 -4,0"
+        android:fillColor="#E4B86E"/>
 </vector>

@@ -340,8 +340,7 @@ private fun HomeTopBar(
         Text(
             "JustFrame",
             color = GlassColors.OnSurface,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
+            style = com.seanyuan.filmframe.ui.theme.BrandMark,
             modifier = Modifier.weight(1f),
         )
         AnimatedVisibility(
