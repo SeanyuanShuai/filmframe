@@ -9,8 +9,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
@@ -23,7 +21,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -68,6 +69,12 @@ fun GlassSurface(
     val borderTop = 0.45f * intensity.coerceAtMost(1.4f)
     val borderBottom = 0.06f * intensity
 
+    // Specular sheen drawn via drawWithContent so it does NOT contribute a
+    // measure constraint. Earlier we used a nested Box(.fillMaxWidth()) which
+    // turned every wrap-content GlassSurface into a parent-width-claiming
+    // child — that wrecked Row weights and caused titles to wrap one glyph
+    // per line. Draw-only avoids that entirely.
+    val sheenAlpha = 0.55f * intensity.coerceAtMost(1.4f)
     Box(
         modifier = modifier
             .clip(shape)
@@ -88,22 +95,26 @@ fun GlassSurface(
                     1f to Color.White.copy(alpha = borderBottom),
                 ),
                 shape = shape,
-            ),
-    ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(1.4.dp)
-                .padding(horizontal = 16.dp)
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color.Transparent,
-                        0.5f to Color.White.copy(alpha = 0.55f * intensity.coerceAtMost(1.4f)),
-                        1f to Color.Transparent,
+            )
+            .drawWithContent {
+                drawContent()
+                val inset = 16.dp.toPx()
+                val sheenH = 1.4.dp.toPx()
+                if (size.width > inset * 2) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            0.5f to Color.White.copy(alpha = sheenAlpha),
+                            1f to Color.Transparent,
+                            startX = inset,
+                            endX = size.width - inset,
+                        ),
+                        topLeft = Offset(inset, 0f),
+                        size = Size(size.width - inset * 2, sheenH),
                     )
-                ),
-        )
+                }
+            },
+    ) {
         content()
     }
 }
@@ -158,6 +169,7 @@ fun GlassButton(
     }
     val textColor = if (accent) Color(0xFF1A1100) else GlassColors.OnSurface
 
+    val sheenAlpha = if (accent) 0.55f else 0.45f
     Box(
         modifier = modifier
             .scale(scale)
@@ -170,24 +182,27 @@ fun GlassButton(
                 indication = null,
                 onClick = onClick,
             )
+            .drawWithContent {
+                drawContent()
+                val inset = 10.dp.toPx()
+                val sheenH = 1.dp.toPx()
+                if (size.width > inset * 2) {
+                    drawRect(
+                        brush = Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            0.5f to Color.White.copy(alpha = sheenAlpha),
+                            1f to Color.Transparent,
+                            startX = inset,
+                            endX = size.width - inset,
+                        ),
+                        topLeft = Offset(inset, 0f),
+                        size = Size(size.width - inset * 2, sheenH),
+                    )
+                }
+            }
             .padding(horizontal = 22.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // Top specular sheen on the button itself
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(1.dp)
-                .padding(horizontal = 10.dp)
-                .background(
-                    Brush.horizontalGradient(
-                        0f to Color.Transparent,
-                        0.5f to Color.White.copy(alpha = if (accent) 0.55f else 0.45f),
-                        1f to Color.Transparent,
-                    )
-                ),
-        )
         CompositionLocalProvider(
             LocalContentColor provides if (enabled) textColor else textColor.copy(alpha = 0.4f)
         ) {
