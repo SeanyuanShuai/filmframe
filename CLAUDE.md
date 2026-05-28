@@ -4,6 +4,18 @@
 
 ---
 
+## ⚠️ Workflow: 任何新需求先 grill-me
+
+用户明确要求：在 FilmFrame 项目里，**用户提出的每一个新需求/新功能/新改动，开始动手前都必须先调用 `grill-me` skill 把思路 grill 一遍**，跑完之后再开始 coding。
+
+**适用范围**：新功能（如"加 onboarding"）、产品方向变更（如"换审美方向"）、非琐碎的重构、UX 改造。
+
+**不适用**：纯 bug 修复（已经明确的 dogfood 反馈）、版本升级、运维型操作（commit / push / 装机 / 截图）、用户已经把方案讲透只让执行的 case。
+
+**违反这条等同于绕过用户产品方向** — 见下面"经验教训 17"。
+
+---
+
 ## Context
 
 - **作者**：SeanyuanShuai（TikTok LIVE PM，工作语言中文）
