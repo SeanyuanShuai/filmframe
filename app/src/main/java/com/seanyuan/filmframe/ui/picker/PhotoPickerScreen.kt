@@ -132,8 +132,7 @@ fun PhotoPickerScreen(
                     !granted -> "需要相册权限"
                     !loaded -> "加载中…"
                     selectedIds.isEmpty() -> "${entries.size} 张照片 · 新到旧"
-                    selectedIds.size == 1 -> "已选 1 张 · 进入编辑"
-                    else -> "已选 ${selectedIds.size} 张 · 进入批处理"
+                    else -> "已选 ${selectedIds.size} 张 · 进入编辑"
                 },
                 onBack = onBack,
             )
@@ -189,7 +188,7 @@ fun PhotoPickerScreen(
                     val confirmLabel = when (selectedIds.size) {
                         0 -> "选照片"
                         1 -> "编辑这张"
-                        else -> "进入批处理 · ${selectedIds.size}"
+                        else -> "编辑 · ${selectedIds.size}"
                     }
                     GlassButton(
                         text = confirmLabel,

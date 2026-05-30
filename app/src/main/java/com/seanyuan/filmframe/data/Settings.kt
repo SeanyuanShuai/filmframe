@@ -66,6 +66,7 @@ object Settings {
     private val LAST_TEMPLATE_ID = stringPreferencesKey("last_template_id")
     private val EXPORT_QUALITY = stringPreferencesKey("export_quality")
     private val AUTO_REMOVE_FRAME = booleanPreferencesKey("auto_remove_frame")
+    private val REMEMBER_STATE = booleanPreferencesKey("remember_state")
 
     fun watermark(context: Context): Flow<WatermarkSettings> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
@@ -118,6 +119,18 @@ object Settings {
     suspend fun updateAutoRemoveExistingFrame(context: Context, value: Boolean) {
         context.applicationContext.settingsDataStore.edit { prefs ->
             prefs[AUTO_REMOVE_FRAME] = value
+        }
+    }
+
+    /** 状态记忆 — when on, Create opens on the last-used template. */
+    fun rememberState(context: Context): Flow<Boolean> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            prefs[REMEMBER_STATE] ?: true
+        }
+
+    suspend fun updateRememberState(context: Context, value: Boolean) {
+        context.applicationContext.settingsDataStore.edit { prefs ->
+            prefs[REMEMBER_STATE] = value
         }
     }
 }

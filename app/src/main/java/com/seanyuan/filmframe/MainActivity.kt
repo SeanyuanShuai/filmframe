@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +14,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Scaffold
@@ -21,26 +23,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import com.seanyuan.filmframe.ui.batch.BatchScreen
+import com.seanyuan.filmframe.ui.create.CreateScreen
+import com.seanyuan.filmframe.ui.edit.EditScreen
+import com.seanyuan.filmframe.ui.gallery.GalleryScreen
 import com.seanyuan.filmframe.ui.glass.GlassColors
-import com.seanyuan.filmframe.ui.home.HomeScreen
+import com.seanyuan.filmframe.ui.nav.BottomNav
+import com.seanyuan.filmframe.ui.nav.Tab
 import com.seanyuan.filmframe.ui.picker.PhotoPickerScreen
-import com.seanyuan.filmframe.ui.result.BatchResultScreen
-import com.seanyuan.filmframe.ui.result.BatchResultSummary
-import com.seanyuan.filmframe.ui.result.ResultScreen
-import com.seanyuan.filmframe.ui.result.ResultSummary
 import com.seanyuan.filmframe.ui.settings.SettingsScreen
 import com.seanyuan.filmframe.ui.theme.FilmFrameTheme
 
-private sealed interface Route {
+private sealed interface Screen {
     val depth: Int
-    data object Home : Route { override val depth = 0 }
-    data object Picker : Route { override val depth = 1 }
-    data class Batch(val uris: List<Uri>) : Route { override val depth = 2 }
-    data object Settings : Route { override val depth = 2 }
-    data class Result(val summary: ResultSummary) : Route { override val depth = 3 }
-    data class BatchResult(val summary: BatchResultSummary) : Route { override val depth = 3 }
+    data object Main : Screen { override val depth = 0 }
+    data object Picker : Screen { override val depth = 1 }
+    data class Edit(val uris: List<Uri>, val presetTemplateId: String) : Screen { override val depth = 2 }
 }
 
 class MainActivity : ComponentActivity() {
@@ -65,11 +64,12 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun AppRoot(modifier: Modifier = Modifier) {
-    var route by remember { mutableStateOf<Route>(Route.Home) }
-    var pendingPickedUri by remember { mutableStateOf<Uri?>(null) }
+    var screen by remember { mutableStateOf<Screen>(Screen.Main) }
+    var tab by remember { mutableStateOf(Tab.Create) }
+    var pendingTemplateId by remember { mutableStateOf("classic") }
 
     AnimatedContent(
-        targetState = route,
+        targetState = screen,
         modifier = modifier,
         transitionSpec = {
             val forward = targetState.depth > initialState.depth
@@ -84,60 +84,59 @@ private fun AppRoot(modifier: Modifier = Modifier) {
                     slideOutHorizontally(durO) { w } + fadeOut(durF)
             }
         },
-        label = "route",
-    ) { r ->
-        when (r) {
-            Route.Home -> HomeScreen(
-                initialUri = pendingPickedUri,
-                onConsumeInitialUri = { pendingPickedUri = null },
-                onRequestPick = { route = Route.Picker },
-                onSettings = { route = Route.Settings },
-                onResult = { route = Route.Result(it) },
-                onOpenSavedExhibit = { exhibitSummary -> route = Route.Result(exhibitSummary) },
+        label = "screen",
+    ) { s ->
+        when (s) {
+            Screen.Main -> MainTabs(
+                tab = tab,
+                onTab = { tab = it },
+                onImport = { templateId ->
+                    pendingTemplateId = templateId
+                    screen = Screen.Picker
+                },
                 modifier = Modifier.fillMaxSize(),
             )
-            Route.Picker -> PhotoPickerScreen(
-                onBack = { route = Route.Home },
+            Screen.Picker -> PhotoPickerScreen(
+                onBack = { screen = Screen.Main },
                 onConfirm = { uris ->
-                    when {
-                        uris.isEmpty() -> route = Route.Home
-                        uris.size == 1 -> {
-                            pendingPickedUri = uris.first()
-                            route = Route.Home
-                        }
-                        else -> route = Route.Batch(uris)
-                    }
+                    screen = if (uris.isEmpty()) Screen.Main
+                    else Screen.Edit(uris, pendingTemplateId)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
-            is Route.Batch -> BatchScreen(
-                uris = r.uris,
-                onBack = { route = Route.Home },
-                onResult = { route = Route.BatchResult(it) },
-                modifier = Modifier.fillMaxSize(),
-            )
-            Route.Settings -> SettingsScreen(
-                onBack = { route = Route.Home },
-                modifier = Modifier.fillMaxSize(),
-            )
-            is Route.Result -> ResultScreen(
-                summary = r.summary,
-                onHome = { route = Route.Home },
-                onAnother = { route = Route.Picker },
-                onRetemplate = r.summary.sourceUri?.let {
-                    {
-                        pendingPickedUri = it
-                        route = Route.Home
-                    }
+            is Screen.Edit -> EditScreen(
+                uris = s.uris,
+                presetTemplateId = s.presetTemplateId,
+                onBack = { screen = Screen.Main },
+                onHome = {
+                    tab = Tab.Create
+                    screen = Screen.Main
                 },
-                modifier = Modifier.fillMaxSize(),
-            )
-            is Route.BatchResult -> BatchResultScreen(
-                summary = r.summary,
-                onHome = { route = Route.Home },
-                onAnother = { route = Route.Picker },
                 modifier = Modifier.fillMaxSize(),
             )
         }
+    }
+}
+
+@Composable
+private fun MainTabs(
+    tab: Tab,
+    onTab: (Tab) -> Unit,
+    onImport: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier.background(GlassColors.DeepBackground)) {
+        Crossfade(targetState = tab, animationSpec = tween(260), label = "tab") { t ->
+            when (t) {
+                Tab.Gallery -> GalleryScreen(modifier = Modifier.fillMaxSize())
+                Tab.Create -> CreateScreen(onImport = onImport, modifier = Modifier.fillMaxSize())
+                Tab.Settings -> SettingsScreen(modifier = Modifier.fillMaxSize())
+            }
+        }
+        BottomNav(
+            current = tab,
+            onSelect = onTab,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
     }
 }

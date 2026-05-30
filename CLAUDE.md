@@ -143,33 +143,37 @@ app/src/main/java/com/seanyuan/filmframe/
 │   ├── FrameProcessor.kt        # 流水线编排
 │   ├── TemplateAdjustments.kt   # 调整 data class ★ iOS 可搬
 │   └── Fonts.kt                 # Typeface lazy load
-└── ui/                          # 全 Compose
-    ├── glass/Glass.kt           # Liquid Glass 组件（GlassSurface / GlassButton / GlassColors）
-    ├── home/HomeScreen.kt       # Landing（含 recent works exhibit）+ Editor（Crossfade 二态）
-    ├── picker/PhotoPickerScreen # 自建 MediaStore 选择器（单/多选同屏，按选中数分流）
-    ├── batch/BatchScreen.kt     # Carousel 批处理（HorizontalPager + 拍立得瓦片）
-    ├── settings/SettingsScreen  # 画质 / 原图处理 / 水印 / 关于 4 section
-    ├── result/ResultScreen.kt   # 单图 Gallery 沉浸结果页 + 模糊背板 + chrome toggle + remix
-    ├── result/BatchResultScreen # 批处理结果页（多图导出汇总）
-    ├── common/ProcessingOverlay # 全屏渲染中 modal
-    ├── params/TemplateParamsSheet # 边框宽度 / 字号 / EXIF 字段开关
+└── ui/                          # 全 Compose（v4.2 交互大改版后）
+    ├── glass/Glass.kt           # Liquid Glass 组件；GlassColors.Accent = 哈苏橙 #F05023
+    ├── nav/AppNav.kt            # Tab 枚举（画廊/创作/设置）+ 浮动玻璃底部导航
+    ├── TemplateLabels.kt        # 模板中文名/英文副标题/swatch 色映射
+    ├── create/CreateScreen.kt   # 创作 Tab：5 模板堆叠卡横滑 + 导入照片（默认 Tab）
+    ├── gallery/GalleryScreen.kt # 画廊 Tab：已导出成品自动滚动陈列（纯展示不可点）
+    ├── picker/PhotoPickerScreen # 自建 MediaStore 选择器（保留；选完进统一编辑页）
+    ├── edit/EditScreen.kt       # 统一沉浸式编辑页：横滑相册 + 导出 N + 选择边框/调整参数双 Tab
+    │                            #   + 一键应用 + 旋钮 + sparkles 去边框 + 处理中/完成浮层
+    ├── settings/SettingsScreen  # 设置 Tab：水平四档画质滑块 / 智能检测 / 水印·EXIF / 偏好
     └── theme/                   # Color / Theme / Type（FilmFrameTheme）
 ```
 
-### 路由（以 `MainActivity.kt` 实际为准）
-`Route` sealed interface，每个有 `depth`，AnimatedContent 按 depth 决定滑动方向。
+> ⚠️ v4.2 已删除：`home/HomeScreen` `batch/BatchScreen` `result/ResultScreen`
+> `result/BatchResultScreen` `params/TemplateParamsSheet` `common/ProcessingOverlay`
+> —— 单图/批量/两结果页已合并进 `edit/EditScreen`。
+
+### 路由（以 `MainActivity.kt` 实际为准，v4.2）
+`Screen` sealed interface（depth 决定滑动方向）+ `Tab` 枚举（Main 内的三 Tab）。
 ```
-Home (Landing 或 Editor 模式, depth 0)
-  │  Landing 含 recent works exhibit（listFilmFrameOutputs → onOpenSavedExhibit → Result）
-  ├─ Picker (depth 1) ── 统一选择器，按选中数分流：
-  │      0 张 → 回 Home；1 张 → pendingPickedUri → Home(Editor)；≥2 张 → Batch
-  ├─ Batch(uris) (depth 2, Carousel) ──► BatchResult
-  ├─ Settings (depth 2)
-  ├─ Result(summary) (depth 3, 单图 Gallery 沉浸)
-  │      onRetemplate：把同一张图塞回 pendingPickedUri → Home，形成 remix 循环
-  └─ BatchResult(summary) (depth 3, 批量导出汇总)
+Main (depth 0) ── 底部三 Tab，Crossfade 切换；只有 Main 显示 BottomNav
+  ├─ Tab.Gallery   已导出成品陈列（纯展示）
+  ├─ Tab.Create    模板横滑选择器（默认）── 点导入照片 → pendingTemplateId → Picker
+  └─ Tab.Settings  画质/检测/水印/偏好
+Picker (depth 1) ── 选完 uris → Edit(uris, pendingTemplateId)；空选 → 回 Main
+Edit(uris, presetTemplateId) (depth 2) ── 统一沉浸编辑页
+       导出后完成浮层：分享 / 换个模板重做（关浮层回编辑）/ 返回主页（→ Tab.Create）
 ```
-关键状态：`route` + `pendingPickedUri`（Picker/Result 回传单图给 Home Editor 的通道）。
+关键状态：`screen` + `tab` + `pendingTemplateId`（Create 把选中模板带进 Picker→Edit）。
+单图也走 Edit（横滑相册 count=1）；导出循环复用 `FrameProcessor.loadFullForExport`
++ OOM 重试 + `ImageExporter.saveToGallery`（和旧 Home/Batch 同一套，逐张写进度）。
 
 ### Compose 关键模式
 - **AppRoot.AnimatedContent** + transition spec 按 depth 决定方向滑动

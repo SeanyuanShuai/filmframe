@@ -36,11 +36,13 @@ import androidx.compose.ui.unit.dp
  * Tokens for the Liquid Glass approximation.
  */
 object GlassColors {
-    val DeepBackground = Color(0xFF050507)
+    val DeepBackground = Color(0xFF050505)
     val DeepSurfaceTint = Color(0xFF1A1E25)  // subtle bluish-cool tint behind glass
-    val Accent = Color(0xFFE4B86E)
-    val AccentDeep = Color(0xFFB47F2F)
-    val AccentSoft = Color(0x33D4A24A)
+    // Hasselblad Orange — the design-system accent. Replaces the earlier Magnum
+    // gold (#E4B86E) per the v4.2 interaction redesign.
+    val Accent = Color(0xFFF05023)
+    val AccentDeep = Color(0xFFC03D19)
+    val AccentSoft = Color(0x33F05023)
     val OnSurface = Color(0xFFFAFAFA)
     val OnSurfaceMuted = Color(0xCCFAFAFA)
     val OnSurfaceFaint = Color(0x77FAFAFA)
@@ -169,7 +171,9 @@ fun GlassButton(
             1f to Color.White.copy(alpha = 0.06f),
         )
     }
-    val textColor = if (accent) Color(0xFF1A1100) else GlassColors.OnSurface
+    // White text on the orange accent fill (was dark-on-gold before the
+    // Hasselblad Orange switch — orange is dark enough to carry white).
+    val textColor = if (accent) Color.White else GlassColors.OnSurface
 
     val sheenAlpha = if (accent) 0.55f else 0.45f
     Box(

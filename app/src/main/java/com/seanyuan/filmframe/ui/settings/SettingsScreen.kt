@@ -1,30 +1,39 @@
 package com.seanyuan.filmframe.ui.settings
 
-import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextFieldDefaults
@@ -39,390 +48,403 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.seanyuan.filmframe.data.ExportQuality
 import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkPosition
 import com.seanyuan.filmframe.data.WatermarkSettings
-import com.seanyuan.filmframe.ui.glass.GlassButton
 import com.seanyuan.filmframe.ui.glass.GlassColors
-import com.seanyuan.filmframe.ui.glass.GlassSurface
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+private val QUALITY_LABELS = listOf("低清", "普清", "高清", "原画")
+private val QUALITY_BY_INDEX = listOf(
+    ExportQuality.Low, ExportQuality.Medium, ExportQuality.High, ExportQuality.Original,
+)
+
+private fun ExportQuality.sliderIndex(): Int = QUALITY_BY_INDEX.indexOf(this).coerceAtLeast(0)
+
 @Composable
-fun SettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
     val autoRemoveFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
+    val rememberState by Settings.rememberState(context).collectAsState(initial = true)
 
     var draftWatermark by remember(watermark) { mutableStateOf(watermark) }
-
-    BackHandler { onBack() }
-
-    // Auto-save watermark draft with 400 ms debounce — covers typing in
-    // the text field without a write storm. Prior behavior lost text if the
-    // user pressed system back instead of the explicit save button.
     LaunchedEffect(draftWatermark) {
         if (draftWatermark == watermark) return@LaunchedEffect
-        delay(400)
-        Settings.updateWatermark(
-            context,
-            draftWatermark.copy(text = draftWatermark.text.trim()),
-        )
+        delay(300)
+        Settings.updateWatermark(context, draftWatermark.copy(text = draftWatermark.text.trim()))
     }
 
-    Box(
+    var showTextDialog by remember { mutableStateOf(false) }
+    var showPositionDialog by remember { mutableStateOf(false) }
+
+    Column(
         modifier = modifier
             .fillMaxSize()
-            .background(GlassColors.DeepBackground),
+            .background(GlassColors.DeepBackground)
+            .verticalScroll(rememberScrollState())
+            .statusBarsPadding(),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(PaddingValues(horizontal = 20.dp, vertical = 20.dp)),
-        ) {
-            TopBar(onBack = onBack)
-            Spacer(Modifier.height(24.dp))
+        Text(
+            "设置",
+            color = GlassColors.OnSurface,
+            fontSize = 34.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(start = 24.dp, top = 20.dp, bottom = 12.dp),
+        )
 
-            var showOriginalInfo by remember { mutableStateOf(false) }
-
-            SectionTitle("画质")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                    ExportQuality.values().forEach { quality ->
-                        QualityRow(
-                            quality = quality,
-                            selected = quality == exportQuality,
-                            onClick = { scope.launch { Settings.updateExportQuality(context, quality) } },
-                            onInfoClick = if (quality == ExportQuality.Original) {
-                                { showOriginalInfo = true }
-                            } else null,
-                        )
-                    }
-                }
+        Section("导出与画质") {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Image, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Text("导出画质", color = GlassColors.OnSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text(exportQuality.displayName, color = Color.White.copy(alpha = 0.4f), fontSize = 14.sp)
             }
+            QualitySlider(
+                index = exportQuality.sliderIndex(),
+                onIndex = { scope.launch { Settings.updateExportQuality(context, QUALITY_BY_INDEX[it]) } },
+                modifier = Modifier.padding(start = 30.dp, end = 30.dp, top = 8.dp, bottom = 40.dp),
+            )
+        }
 
-            if (showOriginalInfo) {
-                AlertDialog(
-                    onDismissRequest = { showOriginalInfo = false },
-                    title = { Text("为什么文件比原图小？", color = GlassColors.OnSurface) },
-                    text = {
-                        Text(
-                            "原画保留全部像素，但 JPEG 是有损格式，重新编码必定会比相机原始 JPEG 小 30-50%。\n\n" +
-                                "Android 的 JPEG 编码器即使 quality=100 也会做色度子采样（4:2:0），" +
-                                "OPPO/小米/Apple 相机直出的 JPEG 通常用更宽松的子采样（4:4:4），所以体积更大。\n\n" +
-                                "像素数量和可见画质完全不变。要做到字节级无损，需要源图是 PNG 或 WEBP。",
-                            color = GlassColors.OnSurfaceMuted,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showOriginalInfo = false }) {
-                            Text("知道了", color = GlassColors.Accent)
-                        }
-                    },
-                    containerColor = Color(0xFF1A1A1A),
+        Section("智能检测") {
+            ToggleRow(
+                icon = Icons.Rounded.Tune,
+                label = "自动移除原图边框",
+                checked = autoRemoveFrame,
+                onCheckedChange = { scope.launch { Settings.updateAutoRemoveExistingFrame(context, it) } },
+            )
+        }
+
+        Section("水印与 EXIF") {
+            ToggleRow(
+                icon = Icons.Rounded.TextFields,
+                label = "自定义水印",
+                checked = draftWatermark.enabled,
+                onCheckedChange = { draftWatermark = draftWatermark.copy(enabled = it) },
+            )
+            if (draftWatermark.enabled) {
+                NavRow(
+                    icon = Icons.Rounded.ChevronRight,
+                    label = "水印内容",
+                    value = draftWatermark.text.ifBlank { "点击编辑" },
+                    onClick = { showTextDialog = true },
+                )
+                NavRow(
+                    icon = Icons.Rounded.ChevronRight,
+                    label = "水印位置",
+                    value = draftWatermark.position.displayName,
+                    onClick = { showPositionDialog = true },
                 )
             }
-
-            Spacer(Modifier.height(24.dp))
-            SectionTitle("原图处理")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.padding(20.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "自动去除原边框",
-                            color = GlassColors.OnSurface,
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Text(
-                            "如 OPPO HASSELBLAD、小米 Leica 这类品牌水印边框",
-                            color = GlassColors.OnSurfaceFaint,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Switch(
-                        checked = autoRemoveFrame,
-                        onCheckedChange = { v ->
-                            scope.launch { Settings.updateAutoRemoveExistingFrame(context, v) }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = GlassColors.OnSurface,
-                            checkedTrackColor = GlassColors.Accent,
-                            uncheckedThumbColor = GlassColors.OnSurfaceFaint,
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.08f),
-                        ),
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SectionTitle("水印")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                "启用水印",
-                                color = GlassColors.OnSurface,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Text(
-                                "渲染在输出图右下角等位置",
-                                color = GlassColors.OnSurfaceFaint,
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                        Switch(
-                            checked = draftWatermark.enabled,
-                            onCheckedChange = { draftWatermark = draftWatermark.copy(enabled = it) },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = GlassColors.OnSurface,
-                                checkedTrackColor = GlassColors.Accent,
-                                uncheckedThumbColor = GlassColors.OnSurfaceFaint,
-                                uncheckedTrackColor = Color.White.copy(alpha = 0.08f),
-                            ),
-                        )
-                    }
-                    if (draftWatermark.enabled) {
-                        Spacer(Modifier.height(16.dp))
-                        OutlinedTextField(
-                            value = draftWatermark.text,
-                            onValueChange = { draftWatermark = draftWatermark.copy(text = it) },
-                            placeholder = { Text("例：© Sean Yuan", color = GlassColors.OnSurfaceFaint) },
-                            label = { Text("水印文字", color = GlassColors.OnSurfaceMuted) },
-                            singleLine = true,
-                            colors = TextFieldDefaults.colors(
-                                focusedTextColor = GlassColors.OnSurface,
-                                unfocusedTextColor = GlassColors.OnSurface,
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                cursorColor = GlassColors.Accent,
-                                focusedIndicatorColor = GlassColors.Accent,
-                                unfocusedIndicatorColor = Color.White.copy(alpha = 0.2f),
-                            ),
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-
-                        Spacer(Modifier.height(20.dp))
-                        Text(
-                            "位置",
-                            color = GlassColors.OnSurfaceMuted,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.Medium,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        PositionGrid(
-                            selected = draftWatermark.position,
-                            onSelect = { draftWatermark = draftWatermark.copy(position = it) },
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(24.dp))
-            SectionTitle("关于")
-            GlassSurface(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    AboutRow("项目", "JustFrame · v0.2 dev")
-                    AboutRow("仓库", "github.com/SeanyuanShuai/filmframe")
-                    AboutRow("字体", "Cormorant Garamond · DM Serif Display · Inter (SIL OFL)")
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "所有改动自动保存。",
-                color = GlassColors.OnSurfaceFaint,
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(start = 4.dp),
+            ToggleRow(
+                icon = Icons.Rounded.History,
+                label = "完整保留 EXIF 数据",
+                checked = true,
+                onCheckedChange = {},
+                enabled = false,
             )
-            Spacer(Modifier.height(40.dp))
+        }
+
+        Section("偏好") {
+            ToggleRow(
+                icon = Icons.Rounded.History,
+                label = "状态记忆",
+                checked = rememberState,
+                onCheckedChange = { scope.launch { Settings.updateRememberState(context, it) } },
+            )
+        }
+
+        Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+            Text("JustFrame v0.2", color = Color.White.copy(alpha = 0.2f), fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(120.dp).navigationBarsPadding())
+    }
+
+    if (showTextDialog) {
+        WatermarkTextDialog(
+            initial = draftWatermark.text,
+            onConfirm = { draftWatermark = draftWatermark.copy(text = it); showTextDialog = false },
+            onDismiss = { showTextDialog = false },
+        )
+    }
+    if (showPositionDialog) {
+        PositionDialog(
+            selected = draftWatermark.position,
+            onSelect = { draftWatermark = draftWatermark.copy(position = it); showPositionDialog = false },
+            onDismiss = { showPositionDialog = false },
+        )
+    }
+}
+
+@Composable
+private fun Section(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        Text(
+            title,
+            color = Color.White.copy(alpha = 0.4f),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            letterSpacing = 1.5.sp,
+            modifier = Modifier.padding(start = 24.dp, bottom = 8.dp),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(Color(0xFF111111))
+                .border(
+                    width = 0.5.dp,
+                    brush = Brush.verticalGradient(
+                        0f to Color.White.copy(alpha = 0.05f),
+                        1f to Color.White.copy(alpha = 0.05f),
+                    ),
+                    shape = RoundedCornerShape(0.dp),
+                )
+                .padding(horizontal = 24.dp),
+        ) {
+            content()
         }
     }
 }
 
 @Composable
-private fun QualityRow(
-    quality: ExportQuality,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onInfoClick: (() -> Unit)? = null,
+private fun ToggleRow(
+    icon: ImageVector,
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
-    val bg = if (selected) GlassColors.AccentSoft else Color.Transparent
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = GlassColors.OnSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        OrangeToggle(checked = checked)
+    }
+}
+
+@Composable
+private fun NavRow(
+    icon: ImageVector,
+    label: String,
+    value: String?,
+    onClick: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .background(bg)
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    quality.displayName,
-                    color = if (selected) GlassColors.Accent else GlassColors.OnSurface,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        Icon(icon, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Text(label, color = GlassColors.OnSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        value?.let {
+            Text(it, color = Color.White.copy(alpha = 0.4f), fontSize = 14.sp)
+            Spacer(Modifier.width(6.dp))
+        }
+        Icon(Icons.Rounded.ChevronRight, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(16.dp))
+    }
+}
+
+/** Orange gradient pill toggle, white knob — matches the v4.2 design. */
+@Composable
+private fun OrangeToggle(checked: Boolean) {
+    val knobOffset by animateDpAsState(
+        targetValue = if (checked) 22.dp else 0.dp,
+        animationSpec = spring(),
+        label = "knob",
+    )
+    Box(
+        modifier = Modifier
+            .width(48.dp)
+            .height(26.dp)
+            .clip(RoundedCornerShape(13.dp))
+            .background(
+                if (checked) {
+                    Brush.linearGradient(listOf(GlassColors.Accent, GlassColors.AccentDeep))
+                } else {
+                    Brush.linearGradient(listOf(Color.White.copy(alpha = 0.1f), Color.White.copy(alpha = 0.1f)))
+                }
+            )
+            .padding(3.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            Modifier
+                .offset(x = knobOffset)
+                .size(20.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.White),
+        )
+    }
+}
+
+@Composable
+private fun QualitySlider(index: Int, onIndex: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    var widthPx by remember { mutableStateOf(1) }
+    val count = QUALITY_LABELS.size
+
+    val trackY = 9.dp
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(52.dp)
+            .onSizeChanged { widthPx = it.width }
+            .pointerInput(count) {
+                fun pick(x: Float) {
+                    val pct = (x / widthPx).coerceIn(0f, 1f)
+                    onIndex(Math.round(pct * (count - 1)))
+                }
+                // onDragStart fires on touch-down, so a plain tap on a node sets
+                // it too — no separate tap detector needed.
+                detectHorizontalDragGestures(
+                    onDragStart = { pick(it.x) },
+                ) { change, _ -> pick(change.position.x) }
+            },
+    ) {
+        // Track
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .offset(y = trackY)
+                .fillMaxWidth()
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(Color.White.copy(alpha = 0.1f)),
+        )
+        // Active fill
+        val fillFraction = if (count > 1) index.toFloat() / (count - 1) else 0f
+        Box(
+            Modifier
+                .align(Alignment.TopStart)
+                .offset(y = trackY)
+                .fillMaxWidth(fillFraction)
+                .height(2.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(GlassColors.Accent),
+        )
+        // Nodes + labels — each a fixed-width column centered on its node x, so
+        // the circle stays round (requiredSize ignores the thin track height)
+        // and the label sits centered beneath it.
+        QUALITY_LABELS.forEachIndexed { i, label ->
+            val selected = i == index
+            val nodeFraction = if (count > 1) i.toFloat() / (count - 1) else 0f
+            val xDp = with(density) { (widthPx * nodeFraction).toDp() }
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .width(56.dp)
+                    .offset(x = xDp - 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier
+                        .requiredSize(20.dp)
+                        .clip(CircleShape)
+                        .background(if (selected) Color.White else Color(0xFF1A1A1A))
+                        .border(
+                            width = if (selected) 2.dp else 3.dp,
+                            color = if (selected) GlassColors.Accent else Color(0xFF333333),
+                            shape = CircleShape,
+                        ),
                 )
-                onInfoClick?.let { info ->
-                    Spacer(Modifier.width(8.dp))
-                    Box(
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    label,
+                    color = if (selected) Color.White else Color.White.copy(alpha = 0.4f),
+                    fontSize = 12.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WatermarkTextDialog(initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("水印内容", color = GlassColors.OnSurface) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = { Text("例：© Sean Yuan", color = GlassColors.OnSurfaceFaint) },
+                singleLine = true,
+                colors = TextFieldDefaults.colors(
+                    focusedTextColor = GlassColors.OnSurface,
+                    unfocusedTextColor = GlassColors.OnSurface,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    cursorColor = GlassColors.Accent,
+                    focusedIndicatorColor = GlassColors.Accent,
+                    unfocusedIndicatorColor = Color.White.copy(alpha = 0.2f),
+                ),
+            )
+        },
+        confirmButton = { TextButton(onClick = { onConfirm(text) }) { Text("确定", color = GlassColors.Accent) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消", color = GlassColors.OnSurfaceMuted) } },
+        containerColor = Color(0xFF1A1A1A),
+    )
+}
+
+@Composable
+private fun PositionDialog(
+    selected: WatermarkPosition,
+    onSelect: (WatermarkPosition) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("水印位置", color = GlassColors.OnSurface) },
+        text = {
+            Column {
+                WatermarkPosition.entries.forEach { pos ->
+                    Row(
                         modifier = Modifier
-                            .height(20.dp)
-                            .width(20.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(0.8.dp, Color.White.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                            .clickable(onClick = info),
-                        contentAlignment = Alignment.Center,
+                            .fillMaxWidth()
+                            .clickable { onSelect(pos) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(
-                            "?",
-                            color = GlassColors.OnSurfaceMuted,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Text(pos.displayName, color = GlassColors.OnSurface, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        if (pos == selected) {
+                            Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(GlassColors.Accent))
+                        }
                     }
                 }
             }
-            Text(
-                quality.subtitle,
-                color = GlassColors.OnSurfaceFaint,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Box(
-            modifier = Modifier
-                .height(18.dp)
-                .width(18.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .border(
-                    if (selected) 5.dp else 1.dp,
-                    if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.25f),
-                    RoundedCornerShape(9.dp),
-                )
-                .background(if (selected) GlassColors.Accent else Color.Transparent),
-        )
-    }
-}
-
-@Composable
-private fun TopBar(onBack: () -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(Color.White.copy(alpha = 0.06f))
-                .clickable(onClick = onBack)
-                .padding(horizontal = 14.dp, vertical = 8.dp),
-        ) {
-            Text("← 返回", color = GlassColors.OnSurface, style = MaterialTheme.typography.bodyMedium)
-        }
-        Spacer(Modifier.width(16.dp))
-        Text(
-            "设置",
-            color = GlassColors.OnSurface,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        color = GlassColors.OnSurfaceMuted,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭", color = GlassColors.Accent) } },
+        containerColor = Color(0xFF1A1A1A),
     )
-}
-
-@Composable
-private fun PositionGrid(
-    selected: WatermarkPosition,
-    onSelect: (WatermarkPosition) -> Unit,
-) {
-    val cells = listOf(
-        WatermarkPosition.TopLeft to WatermarkPosition.TopRight,
-        WatermarkPosition.BottomLeft to WatermarkPosition.BottomRight,
-    )
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        for ((left, right) in cells) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PositionTile(left, selected == left, modifier = Modifier.weight(1f)) { onSelect(left) }
-                PositionTile(right, selected == right, modifier = Modifier.weight(1f)) { onSelect(right) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PositionTile(
-    position: WatermarkPosition,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    val border = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.12f)
-    val bg = if (selected) GlassColors.AccentSoft else Color.White.copy(alpha = 0.04f)
-    Box(
-        modifier = modifier
-            .height(70.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(bg)
-            .border(
-                if (selected) 1.5.dp else 0.5.dp,
-                border,
-                RoundedCornerShape(10.dp),
-            )
-            .clickable(onClick = onClick),
-    ) {
-        val dotPos = when (position) {
-            WatermarkPosition.TopLeft -> Alignment.TopStart
-            WatermarkPosition.TopRight -> Alignment.TopEnd
-            WatermarkPosition.BottomLeft -> Alignment.BottomStart
-            WatermarkPosition.BottomRight -> Alignment.BottomEnd
-        }
-        Box(
-            modifier = Modifier
-                .align(dotPos)
-                .padding(10.dp)
-                .height(6.dp)
-                .width(20.dp)
-                .clip(RoundedCornerShape(3.dp))
-                .background(if (selected) GlassColors.Accent else GlassColors.OnSurfaceFaint),
-        )
-        Text(
-            position.displayName,
-            color = GlassColors.OnSurfaceMuted,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.align(Alignment.Center),
-        )
-    }
-}
-
-@Composable
-private fun AboutRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Text(label, color = GlassColors.OnSurfaceFaint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(64.dp))
-        Text(value, color = GlassColors.OnSurface, style = MaterialTheme.typography.bodySmall)
-    }
 }

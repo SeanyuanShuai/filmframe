@@ -1,37 +1,53 @@
-# FilmFrame 📷
+# JustFrame 📷
 
-> A photography app for designing and applying film-style frames to your photos.
+> Wrap a photo in a photographer's frame and let its EXIF write the caption.
 
-FilmFrame helps photographers quickly design and pick frames for their work — the classic white border, film-strip look, with auto-filled EXIF info (camera, lens, aperture, shutter, ISO).
+JustFrame puts a clean editorial border around your photo and fills the caption straight from the file: camera, lens, aperture, shutter, ISO. Pick a template, import, export. Everything runs on-device. No photo ever leaves your phone.
 
-> ⚠️ **Status: Pre-alpha.** Built in the open as a vibe-coding learning project. Expect breakage.
+> **Status: v0.2, pre-alpha.** Built in the open as a vibe-coding learning project with Claude Code. Expect rough edges.
 
-## ✨ Planned Features
+## What works now
 
-- **Auto EXIF**: import a photo, frame fills in camera/lens/aperture/shutter/ISO automatically
-- **Classic templates**: white border, film strip, Polaroid-style — opinionated defaults
-- **Custom templates** (later): tweak ratios, fonts, logo position, save as reusable presets
-- **Export**: high-resolution output ready for Instagram / 小红书 / print
+- Import from your gallery through a built-in picker; up to 30 photos at once for batch framing.
+- Caption filled from EXIF: camera, lens, aperture, shutter, ISO.
+- Five templates: Classic (经典留白), Bold (高反差), Solid (纯色底), Minimal (极简无界), Polaroid (宝丽来复古).
+- Auto border detection strips an in-camera frame first — a phone's built-in Hasselblad/Leica border, say — so you don't end up with a frame inside a frame.
+- Per-photo adjustments: border width, caption font size, custom caption text, optional watermark.
+- Export up to original resolution, with the source EXIF written back into the output. Files save to Pictures/JustFrame and are **never uploaded anywhere**.
 
-## 🛠 Tech Stack
+Frames render on a Canvas (no OpenCV). Captions are set in Cormorant, DM Serif Display, and Inter, all OFL-licensed and bundled.
+
+## Tech
 
 - Kotlin + Jetpack Compose
-- Android SDK (min 26 / target latest)
-- Coil for image loading, ExifInterface for metadata
+- Coil 3 for image loading, AndroidX ExifInterface for metadata
+- Min SDK 26, target 36
+- No backend, no analytics, no network calls
 
-## 🗺 Roadmap
+## Build
 
-- [ ] Week 1: Hello World running on real device
-- [ ] Week 2: Pick a photo from gallery + show it full-screen
-- [ ] Week 3: Read EXIF and render one hardcoded white-border template
-- [ ] Week 4: 3 built-in templates + template switcher
-- [ ] Week 5: Export full-resolution image to gallery
-- [ ] Week 6: Polish, dark mode, share APK
+Open the project in Android Studio, plug in a device (or start an emulator), and run.
 
-## 📜 License
+## Roadmap
+
+The import → frame → export loop is done, across five templates and batch mode. Next up:
+
+- [ ] Custom templates: editable ratios, fonts, and logo position, saved as presets
+- [ ] Aspect presets for Instagram and 小红书
+- [ ] Polish pass on the new three-tab interaction
+
+Already shipped:
+
+- [x] Pick photos, read EXIF, render frames on device
+- [x] Five built-in templates with live switching
+- [x] Full-resolution export with EXIF preserved
+- [x] Batch processing
+- [x] Interaction redesign — three-tab layout (Gallery / Create / Settings), one immersive editor, Hasselblad-orange accent
+
+## License
 
 MIT — see [LICENSE](LICENSE).
 
-## 🙋 About
+## About
 
-Built by [@SeanyuanShuai](https://github.com/SeanyuanShuai), a PM learning to ship by vibe-coding with Claude.
+Built by [@SeanyuanShuai](https://github.com/SeanyuanShuai), a PM learning to ship by vibe-coding with Claude Code.
