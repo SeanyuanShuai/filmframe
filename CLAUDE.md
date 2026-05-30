@@ -20,10 +20,22 @@
 
 - **作者**：SeanyuanShuai（TikTok LIVE PM，工作语言中文）
 - **项目**：开源 Android 摄影边框 App。作者人生第一个 Android App，**vibe coding 学编程的载体**
-- **时间线**：2026-05-25 启动，v0.1 主流程 + UX 已完成，处于真机 dogfood 调优阶段
-- **仓库**：https://github.com/SeanyuanShuai/filmframe（本地 `~/filmframe`）
+- **时间线**：2026-05-25 启动，v0.1 主流程 + UX + 品牌 VI 已完成，处于真机 dogfood 调优阶段
+- **仓库**：https://github.com/SeanyuanShuai/filmframe（本地 `~/filmframe`，本地目录和 repo 名仍叫 filmframe）
 - **调试机**：OPPO Find X9 Ultra（型号 PMA110）
 - **未来计划**：iOS 版本要做，架构需提前考虑可移植性
+
+### 命名 / Branding（重要：已改名）
+- **App 显示名 = `JustFrame`**（`strings.xml` app_name）。原名 FilmFrame 已弃用
+- **package / applicationId / namespace 仍是 `com.seanyuan.filmframe`** — 没改，改了要重签名 + 丢用户数据
+- **导出目录 = `Pictures/JustFrame/`**；`MediaGallery` 同时匹配 legacy `Pictures/FilmFrame/`，老 dogfood 图不丢
+- 有 adaptive launcher icon + editorial wordmark（commit `1df124f` "JustFrame VI"）
+- ⚠️ **README.md 还是旧的 FilmFrame 文案 + 过时 roadmap** — 待重写（见 Open Tickets）
+
+### 设计参考资产（先看再改 UI）
+- `docs/DESIGN_BRIEF.md` — Claude-ready 设计 brief
+- `docs/screens/*.png` — 11 张真机参考截图：`00_logo` `01_landing` `02_editor` `03_settings` `04_picker` `05_picker_multi` `06_batch` `07_batchresult` `08_result` `09_saved_exhibit` `10_settings_quality_help`
+- 构建版本：`versionName = "1.0"`（build.gradle），minSdk 26 / targetSdk 36 / compileSdk 36
 
 ---
 
@@ -107,6 +119,8 @@
 17. **每个 milestone 后立即 commit + push** — `feat(...)` / `fix(...)` 形式，message 包含动机不只是"what"
 18. **TESTING.md 矩阵 + 真机回归是 QA 双保险**
 19. **不要绕过用户的产品方向** — 用户多次明确批处理优先级 / 字体规格 / 不要 chinese caption。每次出现似乎要绕过的诱惑（如"先简化用 ASCII")，回头看 CLAUDE.md
+20. **改 App 显示名不要碰 package** — FilmFrame→JustFrame 只改了 `app_name`，`com.seanyuan.filmframe` 保持不动。改 package 要重签名、丢已安装用户数据、换导出目录。改名时让查询同时匹配 legacy 目录（`Pictures/FilmFrame/`）保证老图不丢
+21. **统一 Picker 比拆两个简单** — 选择器不分单/多两屏，一屏选完按选中数在路由层分流（1 张→Editor，≥2 张→Batch），state 更少
 
 ---
 
@@ -130,25 +144,32 @@ app/src/main/java/com/seanyuan/filmframe/
 │   ├── TemplateAdjustments.kt   # 调整 data class ★ iOS 可搬
 │   └── Fonts.kt                 # Typeface lazy load
 └── ui/                          # 全 Compose
-    ├── glass/                   # Liquid Glass 组件
-    ├── home/                    # 首页 + 编辑器
-    ├── picker/                  # 自建 MediaStore 选择器
-    ├── batch/                   # Carousel 批处理
-    ├── settings/                # 设置页
-    ├── result/                  # Gallery 沉浸结果页
-    ├── common/                  # ProcessingOverlay
-    └── params/                  # 模板参数面板
+    ├── glass/Glass.kt           # Liquid Glass 组件（GlassSurface / GlassButton / GlassColors）
+    ├── home/HomeScreen.kt       # Landing（含 recent works exhibit）+ Editor（Crossfade 二态）
+    ├── picker/PhotoPickerScreen # 自建 MediaStore 选择器（单/多选同屏，按选中数分流）
+    ├── batch/BatchScreen.kt     # Carousel 批处理（HorizontalPager + 拍立得瓦片）
+    ├── settings/SettingsScreen  # 画质 / 原图处理 / 水印 / 关于 4 section
+    ├── result/ResultScreen.kt   # 单图 Gallery 沉浸结果页 + 模糊背板 + chrome toggle + remix
+    ├── result/BatchResultScreen # 批处理结果页（多图导出汇总）
+    ├── common/ProcessingOverlay # 全屏渲染中 modal
+    ├── params/TemplateParamsSheet # 边框宽度 / 字号 / EXIF 字段开关
+    └── theme/                   # Color / Theme / Type（FilmFrameTheme）
 ```
 
-### 路由
+### 路由（以 `MainActivity.kt` 实际为准）
+`Route` sealed interface，每个有 `depth`，AnimatedContent 按 depth 决定滑动方向。
 ```
-Home (Landing 或 Editor 模式)
-  ├─ PickerSingle ─► consumes URI → Home (Editor)
-  ├─ PickerMulti ─► uris → Batch
-  ├─ Settings
-  ├─ Batch (Carousel)
-  └─ Result (Gallery 沉浸)
+Home (Landing 或 Editor 模式, depth 0)
+  │  Landing 含 recent works exhibit（listFilmFrameOutputs → onOpenSavedExhibit → Result）
+  ├─ Picker (depth 1) ── 统一选择器，按选中数分流：
+  │      0 张 → 回 Home；1 张 → pendingPickedUri → Home(Editor)；≥2 张 → Batch
+  ├─ Batch(uris) (depth 2, Carousel) ──► BatchResult
+  ├─ Settings (depth 2)
+  ├─ Result(summary) (depth 3, 单图 Gallery 沉浸)
+  │      onRetemplate：把同一张图塞回 pendingPickedUri → Home，形成 remix 循环
+  └─ BatchResult(summary) (depth 3, 批量导出汇总)
 ```
+关键状态：`route` + `pendingPickedUri`（Picker/Result 回传单图给 Home Editor 的通道）。
 
 ### Compose 关键模式
 - **AppRoot.AnimatedContent** + transition spec 按 depth 决定方向滑动
@@ -234,14 +255,15 @@ adb uninstall com.seanyuan.filmframe
 
 ---
 
-## Open Tickets（待办）
+## Open Tickets（待办，非用户确认的硬需求，多为 dogfood 候选）
 
-- App 图标对比度 — 桌面上偏暗看不清
+- **README.md 重写** — 还是旧 FilmFrame 文案 + 过时 roadmap，与 JustFrame 现状脱节
 - Picker 长按预览大图（用户原始"看不清楚"复杂场景的进一步缓解）
 - Polaroid 模板字体位置精修
 - Onboarding 首启三步介绍
-- v0.1 release APK + tag
+- v0.1 release APK + tag（versionName 已是 "1.0"）
 - `LocalLifecycleOwner` deprecated 警告（要加 `lifecycle-runtime-compose` dep）
+- ResultScreen 左右滑切换最近几张已保存图（NEXT.md 提到过）
 
 ## 永远不做（用户明示）
 
