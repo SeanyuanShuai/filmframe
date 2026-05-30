@@ -84,6 +84,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
     val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
     val autoRemoveFrame by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
     val rememberState by Settings.rememberState(context).collectAsState(initial = true)
+    val preserveExif by Settings.preserveExif(context).collectAsState(initial = true)
 
     var draftWatermark by remember(watermark) { mutableStateOf(watermark) }
     LaunchedEffect(draftWatermark) {
@@ -160,9 +161,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             ToggleRow(
                 icon = Icons.Rounded.History,
                 label = "完整保留 EXIF 数据",
-                checked = true,
-                onCheckedChange = {},
-                enabled = false,
+                checked = preserveExif,
+                onCheckedChange = { scope.launch { Settings.updatePreserveExif(context, it) } },
             )
         }
 

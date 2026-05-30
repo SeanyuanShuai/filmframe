@@ -86,6 +86,17 @@ object FrameDetector {
     private const val SAFETY_INSET_RATIO = 0.012f
     private const val MAX_INSET_RATIO = 0.5f
 
+    // ---- Bottom watermark-bar (Android co-brand strips) ----
+    // The dominant Android built-in frame is a solid bar appended below the
+    // photo (Leica / Hasselblad / Zeiss / XMAGE / Honor), white or black, with
+    // a logo on one end and EXIF text on the other, and a HARD top edge.
+    private const val BAR_MAX_RATIO = 0.20f      // bars run ~7-16% of height; cap at 20%
+    private const val BAR_MIN_RATIO = 0.05f
+    private const val BAR_ROW_FRACTION = 0.5f    // a bar row is ≥50% background colour (logo/text take the rest)
+    private const val BAR_MISS_RATIO = 0.02f     // tolerate a text line ~2% tall before stopping the walk
+    private const val BAR_EDGE_STEP_MIN = 60     // sum of per-channel deltas across the seam: bars step, gradients ramp
+    private const val BAR_FILL_MIN = 0.6f        // the bar region is ≥60% background colour
+
     /**
      * Android-bound entry point. Downsamples the bitmap, extracts its pixel
      * array, then defers to the pure-Kotlin [detectFromPixels]. Insets are
@@ -126,6 +137,24 @@ object FrameDetector {
      * Inset values returned are in the SAME pixel space as the input.
      */
     fun detectFromPixels(pixels: IntArray, w: Int, h: Int): FrameDetectionResult {
+        // 1. Four-side mat (white/black border, polaroid, 3-sided).
+        val mat = detectMat(pixels, w, h)
+        if (mat.hasFrame) return mat
+        // 2. Bottom watermark bar — the common Android co-brand strip the mat
+        //    detector can't see, because the frame is on one side only.
+        val (barHeight, barColor) = detectBottomBar(pixels, w, h)
+        if (barHeight > 0) {
+            return FrameDetectionResult(
+                hasFrame = true,
+                insets = FrameInsets(top = 0, bottom = barHeight, left = 0, right = 0),
+                frameColor = barColor,
+                confidence = 0.9f,
+            )
+        }
+        return FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), mat.frameColor, 0f)
+    }
+
+    private fun detectMat(pixels: IntArray, w: Int, h: Int): FrameDetectionResult {
         val ring = sampleBorderColors(pixels, w, h)
         val (frameColor, clusterCount) = dominantColor(ring)
         if (clusterCount < MIN_BORDER_CLUSTER) {
@@ -361,5 +390,117 @@ object FrameDetector {
         val avgRatio = (tRatio + bRatio + lRatio + rRatio) / 4
         val framedSides = listOf(top, bottom, left, right).count { it > 0 }
         return min(1f, (avgRatio * 4f + framedSides * 0.15f).coerceIn(0f, 1f))
+    }
+
+    /**
+     * Detect a solid watermark bar appended at the bottom (the Android co-brand
+     * strip). Returns (barHeight, barColor); height 0 if none.
+     *
+     * Pipeline: take the bar's background colour from the outer rows, require it
+     * to be near-white or near-black, walk up while rows stay mostly that colour
+     * (tolerating logo/text rows), then gate on three things — a height in the
+     * 5-20% band, a HARD step across the seam (a real bar steps; a sky/ground
+     * gradient ramps, and the step test is what tells them apart), and a bar
+     * region that's predominantly the background colour.
+     */
+    private fun detectBottomBar(pixels: IntArray, w: Int, h: Int): Pair<Int, Int> {
+        val barColor = dominantBottomColor(pixels, w, h)
+        if (!isBarColor(barColor)) return 0 to barColor
+
+        val maxBar = (h * BAR_MAX_RATIO).toInt()
+        val minBar = max(1, (h * BAR_MIN_RATIO).toInt())
+        val missTol = max(4, (h * BAR_MISS_RATIO).toInt())
+        if (maxBar < minBar) return 0 to barColor
+
+        var bar = 0
+        var miss = 0
+        for (i in 0 until maxBar) {
+            val y = h - 1 - i
+            if (rowMatchRatio(pixels, w, y, barColor) >= BAR_ROW_FRACTION) {
+                bar = i + 1
+                miss = 0
+            } else {
+                miss++
+                if (miss > missTol) break
+            }
+        }
+        if (bar < minBar) return 0 to barColor
+
+        val seamY = h - bar
+        if (seamY < 4) return 0 to barColor
+
+        // Hard-edge test — the decisive signal. Rows just inside the bar vs rows
+        // just above (photo) must differ sharply. A gradient's cross-seam step is
+        // tiny, so this rejects uniform sky/ground.
+        val inside = rowsAverage(pixels, w, seamY, 3)
+        val above = rowsAverage(pixels, w, (seamY - 3).coerceAtLeast(0), 3)
+        if (colorDistance(inside, above) < BAR_EDGE_STEP_MIN) return 0 to barColor
+
+        // The bar must be predominantly its background colour, not just one step line.
+        if (regionFraction(pixels, w, seamY, h - 1, barColor) < BAR_FILL_MIN) return 0 to barColor
+
+        val safety = (h * SAFETY_INSET_RATIO).toInt()
+        return (bar + safety).coerceAtMost((h * MAX_INSET_RATIO).toInt()) to barColor
+    }
+
+    /** Modal colour of the outermost bottom rows, via a coarse 16-level histogram. */
+    private fun dominantBottomColor(pixels: IntArray, w: Int, h: Int): Int {
+        val rows = max(2, (h * 0.01f).toInt())
+        val counts = HashMap<Int, Int>()
+        for (y in (h - rows) until h) {
+            val start = y * w
+            for (x in 0 until w) {
+                val p = pixels[start + x]
+                val key = (((p shr 20) and 0xF) shl 8) or (((p shr 12) and 0xF) shl 4) or ((p shr 4) and 0xF)
+                counts[key] = (counts[key] ?: 0) + 1
+            }
+        }
+        val topKey = counts.maxByOrNull { it.value }?.key ?: return rgb(255, 255, 255)
+        return rgb(((topKey shr 8) and 0xF) * 17, ((topKey shr 4) and 0xF) * 17, (topKey and 0xF) * 17)
+    }
+
+    /** A bar background is near-neutral white/off-white or near-black. */
+    private fun isBarColor(c: Int): Boolean {
+        val r = (c shr 16) and 0xFF
+        val g = (c shr 8) and 0xFF
+        val b = c and 0xFF
+        val luma = (r * 299 + g * 587 + b * 114) / 1000
+        val spread = max(max(r, g), b) - min(min(r, g), b)
+        return (luma >= 210 && spread <= 30) || luma <= 48
+    }
+
+    private fun rowsAverage(pixels: IntArray, w: Int, yStart: Int, count: Int): Int {
+        var r = 0L; var g = 0L; var b = 0L; var n = 0L
+        for (y in yStart until (yStart + count)) {
+            val start = y * w
+            for (x in 0 until w) {
+                val p = pixels[start + x]
+                r += (p shr 16) and 0xFF
+                g += (p shr 8) and 0xFF
+                b += p and 0xFF
+                n++
+            }
+        }
+        if (n == 0L) return rgb(0, 0, 0)
+        return rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+    }
+
+    private fun regionFraction(pixels: IntArray, w: Int, yFrom: Int, yTo: Int, color: Int): Float {
+        var match = 0; var total = 0
+        for (y in yFrom..yTo) {
+            val start = y * w
+            for (x in 0 until w) {
+                if (pixelMatches(pixels[start + x], color)) match++
+                total++
+            }
+        }
+        return if (total == 0) 0f else match.toFloat() / total
+    }
+
+    private fun colorDistance(a: Int, b: Int): Int {
+        val dr = abs(((a shr 16) and 0xFF) - ((b shr 16) and 0xFF))
+        val dg = abs(((a shr 8) and 0xFF) - ((b shr 8) and 0xFF))
+        val db = abs((a and 0xFF) - (b and 0xFF))
+        return dr + dg + db
     }
 }

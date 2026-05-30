@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -182,8 +183,10 @@ private fun TemplateCard(
         contentAlignment = Alignment.Center,
     ) {
         Box(
+            // 70% of the available height — keeps the card clear of the 导入照片
+            // button below it (they used to overlap at full height).
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxHeight(0.7f)
                 .aspectRatio(2.5f / 4f, matchHeightConstraintsFirst = true),
         ) {
             // Stacked depth cards behind the main card.

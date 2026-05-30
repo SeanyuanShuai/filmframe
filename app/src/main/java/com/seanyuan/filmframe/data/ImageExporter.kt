@@ -45,6 +45,7 @@ object ImageExporter {
         sourceUri: Uri,
         loaded: LoadedBitmap? = null,
         quality: ExportQuality = ExportQuality.Original,
+        preserveExif: Boolean = true,
     ): ExportResult? {
         val format = if (quality.forceJpeg) {
             ExportFormat.Jpeg
@@ -88,7 +89,7 @@ object ImageExporter {
                 }
             } ?: throw IllegalStateException("openOutputStream returned null")
 
-            if (format == ExportFormat.Jpeg) {
+            if (format == ExportFormat.Jpeg && preserveExif) {
                 runCatching { copyExif(context, sourceUri, outputUri) }
             }
 

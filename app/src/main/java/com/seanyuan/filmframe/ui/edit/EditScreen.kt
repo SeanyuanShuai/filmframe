@@ -13,6 +13,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.Compare
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.IosShare
 import androidx.compose.material.icons.rounded.Refresh
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +111,7 @@ fun EditScreen(
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
     val autoRemove by Settings.autoRemoveExistingFrame(context).collectAsState(initial = true)
+    val preserveExif by Settings.preserveExif(context).collectAsState(initial = true)
 
     val count = uris.size
     val templateIds = remember { mutableStateListOf<String>().apply { repeat(count) { add(presetTemplateId) } } }
@@ -124,6 +128,7 @@ fun EditScreen(
     var applyToAll by remember { mutableStateOf(false) }
     var activeTab by remember { mutableStateOf(EditTab.Template) }
     var renderEpoch by remember { mutableIntStateOf(0) }
+    var comparing by remember { mutableStateOf(false) }  // hold-to-compare with the original
 
     var exporting by remember { mutableStateOf(false) }
     var exportIndex by remember { mutableIntStateOf(0) }
@@ -236,7 +241,7 @@ fun EditScreen(
                                 context, full, FrameRenderer.byId(templateIds[i]),
                                 stripFlags[i], watermark, adjustments[i],
                             )
-                            return@withContext ImageExporter.saveToGallery(context, bmp, uri, full.loaded, exportQuality)
+                            return@withContext ImageExporter.saveToGallery(context, bmp, uri, full.loaded, exportQuality, preserveExif)
                         } catch (_: OutOfMemoryError) {
                             cap = (cap / 2).coerceAtLeast(1024)
                         }
@@ -265,7 +270,9 @@ fun EditScreen(
             beyondViewportPageCount = 1,
         ) { page ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                val bmp = previews[page]
+                val showOriginal = comparing && page == currentPage
+                val original = sources[page]?.source
+                val bmp = if (showOriginal && original != null) original else previews[page]
                 if (bmp != null) {
                     Image(
                         bitmap = bmp.asImageBitmap(),
@@ -276,6 +283,22 @@ fun EditScreen(
                     )
                 } else {
                     CircularProgressIndicator(color = GlassColors.Accent, strokeWidth = 2.dp)
+                }
+                if (showOriginal) {
+                    Text(
+                        "原图",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 3.sp,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 24.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                    )
                 }
             }
         }
@@ -300,38 +323,46 @@ fun EditScreen(
             )
         }
 
-        // Top controls
-        Row(
+        // Top controls — back (left) + export (right), with a hold-to-compare
+        // button tucked under the export pill.
+        Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.End,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color.Black.copy(alpha = 0.4f))
-                    .border(0.5.dp, Color.White.copy(alpha = 0.1f), CircleShape)
-                    .clickable { haptics.tick(); onBack() },
-                contentAlignment = Alignment.Center,
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.ChevronLeft, "返回", tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(26.dp))
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.1f), CircleShape)
+                        .clickable { haptics.tick(); onBack() },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.ChevronLeft, "返回", tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(26.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(GlassColors.Accent)
+                        .clickable { haptics.medium(); startExport() }
+                        .padding(horizontal = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("导出 ($count)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                }
             }
-            Spacer(Modifier.weight(1f))
-            Box(
-                modifier = Modifier
-                    .height(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(GlassColors.Accent)
-                    .clickable { haptics.medium(); startExport() }
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("导出 ($count)", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            }
+            Spacer(Modifier.height(10.dp))
+            CompareHoldButton(onPressChange = { comparing = it })
         }
 
         // Bottom control sheet
@@ -788,6 +819,34 @@ private fun ActionButton(
         Icon(icon, null, tint = fg, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
         Text(text, color = fg, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun CompareHoldButton(onPressChange: (Boolean) -> Unit) {
+    val haptics = rememberHaptics()
+    Row(
+        modifier = Modifier
+            .height(34.dp)
+            .clip(RoundedCornerShape(17.dp))
+            .background(Color.Black.copy(alpha = 0.4f))
+            .border(0.5.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(17.dp))
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        haptics.tick()
+                        onPressChange(true)
+                        tryAwaitRelease()
+                        onPressChange(false)
+                    },
+                )
+            }
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Rounded.Compare, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(15.dp))
+        Spacer(Modifier.width(6.dp))
+        Text("按住对比原图", color = Color.White.copy(alpha = 0.85f), fontSize = 12.sp, letterSpacing = 1.sp)
     }
 }
 

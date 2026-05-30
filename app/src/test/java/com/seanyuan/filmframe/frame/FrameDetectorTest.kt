@@ -88,4 +88,58 @@ class FrameDetectorTest {
         assertTrue("a dark mat is a frame too", r.hasFrame)
         assertTrue("voted frame colour is dark", ((r.frameColor shr 16) and 0xFF) < 40)
     }
+
+    // ---- Android bottom watermark bar (Leica / Hasselblad / Zeiss / XMAGE …) ----
+
+    private fun withBottomBar(
+        w: Int, h: Int, barH: Int, bar: Int,
+        leftPhoto: Int, rightPhoto: Int, logo: Int? = null,
+    ) = image(w, h) { x, y ->
+        when {
+            y >= h - barH -> if (logo != null && (x < w * 15 / 100 || x > w * 80 / 100)) logo else bar
+            x < w / 2 -> leftPhoto
+            else -> rightPhoto
+        }
+    }
+
+    @Test
+    fun detectsWhiteBottomBar() {
+        val w = 400; val h = 600
+        val barH = (h * 0.12f).toInt()
+        val px = withBottomBar(w, h, barH, white, argb(40, 80, 160), argb(70, 130, 60))
+        val r = FrameDetector.detectFromPixels(px, w, h)
+        assertTrue("white watermark bar should be detected", r.hasFrame)
+        assertEquals("only the bottom is cropped", 0, r.insets.top)
+        assertEquals(0, r.insets.left)
+        assertEquals(0, r.insets.right)
+        assertTrue("bottom inset ≈ bar height", r.insets.bottom in (barH - 5)..(barH + 20))
+    }
+
+    @Test
+    fun detectsBlackBottomBar() {
+        val w = 400; val h = 600
+        val barH = (h * 0.1f).toInt()
+        val px = withBottomBar(w, h, barH, black, argb(180, 200, 230), argb(150, 170, 120))
+        val r = FrameDetector.detectFromPixels(px, w, h)
+        assertTrue("black watermark bar should be detected", r.hasFrame)
+        assertTrue(r.insets.bottom in (barH - 5)..(barH + 20))
+    }
+
+    @Test
+    fun bottomBarSurvivesLogoAndText() {
+        val w = 400; val h = 600
+        val barH = (h * 0.12f).toInt()
+        // White bar with a dark logo on the left and dark text block on the right.
+        val px = withBottomBar(w, h, barH, white, argb(40, 80, 160), argb(70, 130, 60), logo = black)
+        assertTrue("bar with logo + text still detected", FrameDetector.detectFromPixels(px, w, h).hasFrame)
+    }
+
+    @Test
+    fun rejectsColoredBottomRegionAsBar() {
+        val w = 400; val h = 600
+        // Bottom third is uniform green grass — a coloured region, not a
+        // near-white/black watermark bar.
+        val px = withBottomBar(w, h, (h * 0.3f).toInt(), argb(40, 120, 40), argb(40, 80, 160), argb(40, 80, 160))
+        assertFalse("green ground is not a watermark bar", FrameDetector.detectFromPixels(px, w, h).hasFrame)
+    }
 }

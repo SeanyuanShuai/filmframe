@@ -67,6 +67,7 @@ object Settings {
     private val EXPORT_QUALITY = stringPreferencesKey("export_quality")
     private val AUTO_REMOVE_FRAME = booleanPreferencesKey("auto_remove_frame")
     private val REMEMBER_STATE = booleanPreferencesKey("remember_state")
+    private val PRESERVE_EXIF = booleanPreferencesKey("preserve_exif")
 
     fun watermark(context: Context): Flow<WatermarkSettings> =
         context.applicationContext.settingsDataStore.data.map { prefs ->
@@ -131,6 +132,18 @@ object Settings {
     suspend fun updateRememberState(context: Context, value: Boolean) {
         context.applicationContext.settingsDataStore.edit { prefs ->
             prefs[REMEMBER_STATE] = value
+        }
+    }
+
+    /** 完整保留 EXIF — when on, source camera metadata is written into JPEG exports. */
+    fun preserveExif(context: Context): Flow<Boolean> =
+        context.applicationContext.settingsDataStore.data.map { prefs ->
+            prefs[PRESERVE_EXIF] ?: true
+        }
+
+    suspend fun updatePreserveExif(context: Context, value: Boolean) {
+        context.applicationContext.settingsDataStore.edit { prefs ->
+            prefs[PRESERVE_EXIF] = value
         }
     }
 }
