@@ -41,7 +41,7 @@ private sealed interface Screen {
     val depth: Int
     data object Main : Screen { override val depth = 0 }
     data object Picker : Screen { override val depth = 1 }
-    data class Edit(val uris: List<Uri>, val presetTemplateId: String) : Screen { override val depth = 2 }
+    data class Edit(val uris: List<Uri>, val groupId: String) : Screen { override val depth = 2 }
 }
 
 class MainActivity : ComponentActivity() {
@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
 private fun AppRoot(modifier: Modifier = Modifier) {
     var screen by remember { mutableStateOf<Screen>(Screen.Main) }
     var tab by remember { mutableStateOf(Tab.Create) }
-    var pendingTemplateId by remember { mutableStateOf("classic") }
+    var pendingGroupId by remember { mutableStateOf("editorial") }
 
     AnimatedContent(
         targetState = screen,
@@ -92,8 +92,8 @@ private fun AppRoot(modifier: Modifier = Modifier) {
             Screen.Main -> MainTabs(
                 tab = tab,
                 onTab = { tab = it },
-                onImport = { templateId ->
-                    pendingTemplateId = templateId
+                onImport = { groupId ->
+                    pendingGroupId = groupId
                     screen = Screen.Picker
                 },
                 modifier = Modifier.fillMaxSize(),
@@ -102,13 +102,13 @@ private fun AppRoot(modifier: Modifier = Modifier) {
                 onBack = { screen = Screen.Main },
                 onConfirm = { uris ->
                     screen = if (uris.isEmpty()) Screen.Main
-                    else Screen.Edit(uris, pendingTemplateId)
+                    else Screen.Edit(uris, pendingGroupId)
                 },
                 modifier = Modifier.fillMaxSize(),
             )
             is Screen.Edit -> EditScreen(
                 uris = s.uris,
-                presetTemplateId = s.presetTemplateId,
+                groupId = s.groupId,
                 onBack = { screen = Screen.Main },
                 onHome = {
                     tab = Tab.Create

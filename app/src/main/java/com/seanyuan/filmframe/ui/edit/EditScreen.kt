@@ -78,11 +78,12 @@ import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.frame.FrameProcessor
 import com.seanyuan.filmframe.frame.FrameRenderer
+import com.seanyuan.filmframe.frame.FrameTemplate
 import com.seanyuan.filmframe.frame.ProcessedSource
 import com.seanyuan.filmframe.frame.TemplateAdjustments
-import com.seanyuan.filmframe.ui.TemplateLabels
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.rememberHaptics
+import kotlin.math.max
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,7 +100,7 @@ private enum class EditTab { Template, Adjust }
 @Composable
 fun EditScreen(
     uris: List<Uri>,
-    presetTemplateId: String,
+    groupId: String,
     onBack: () -> Unit,
     onHome: () -> Unit,
     modifier: Modifier = Modifier,
@@ -107,6 +108,8 @@ fun EditScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val haptics = rememberHaptics()
+    val group = remember(groupId) { FrameRenderer.groupById(groupId) }
+    val defaultTemplateId = group.templates.first().id
 
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
@@ -114,12 +117,15 @@ fun EditScreen(
     val preserveExif by Settings.preserveExif(context).collectAsState(initial = true)
 
     val count = uris.size
-    val templateIds = remember { mutableStateListOf<String>().apply { repeat(count) { add(presetTemplateId) } } }
+    val templateIds = remember { mutableStateListOf<String>().apply { repeat(count) { add(defaultTemplateId) } } }
     val stripFlags = remember { mutableStateListOf<Boolean>().apply { repeat(count) { add(false) } } }
     // Per-photo adjustments — each photo carries its own border/caption tuning.
     val adjustments = remember { mutableStateListOf<TemplateAdjustments>().apply { repeat(count) { add(TemplateAdjustments.Default) } } }
     val sources = remember { mutableStateMapOf<Int, ProcessedSource>() }
     val previews = remember { mutableStateMapOf<Int, Bitmap>() }
+    // Live swatch thumbnails — the current photo rendered small in each of the
+    // group's styles, so the picker shows the actual result, not a flat colour.
+    val swatchPreviews = remember { mutableStateMapOf<String, Bitmap>() }
     // Signature of the inputs each cached preview was rendered from. The render
     // pass swaps a preview in place only when its signature changes, so the old
     // bitmap stays on screen until the new one is ready — no flash to a spinner.
@@ -206,6 +212,24 @@ fun EditScreen(
                 previews[i] = out
                 renderedSig[i] = want
             }
+        }
+    }
+
+    // Swatch thumbnails — the current photo rendered small in each group style.
+    LaunchedEffect(currentPage, sources[currentPage], stripFlags.getOrElse(currentPage) { false }) {
+        val ps = sources[currentPage] ?: return@LaunchedEffect
+        val strip = stripFlags.getOrElse(currentPage) { false }
+        val small = withContext(Dispatchers.Default) {
+            val base = if (strip && ps.detection.hasFrame) FrameRenderer.deframe(ps.source, ps.detection.insets) else ps.source
+            val longEdge = max(base.width, base.height)
+            val scale = (240f / longEdge).coerceAtMost(1f)
+            Bitmap.createScaledBitmap(base, (base.width * scale).toInt().coerceAtLeast(1), (base.height * scale).toInt().coerceAtLeast(1), true)
+        }
+        group.templates.forEach { tpl ->
+            val bmp = withContext(Dispatchers.Default) {
+                runCatching { tpl.render(context, small, ps.exif, WatermarkSettings.Default, TemplateAdjustments.Default) }.getOrNull()
+            }
+            if (bmp != null) swatchPreviews[tpl.id] = bmp
         }
     }
 
@@ -370,6 +394,8 @@ fun EditScreen(
             activeTab = activeTab,
             onTab = { haptics.tick(); activeTab = it },
             count = count,
+            templates = group.templates,
+            swatchPreviews = swatchPreviews,
             templateIds = templateIds,
             currentPage = currentPage,
             applyToAll = applyToAll,
@@ -410,6 +436,8 @@ private fun BottomSheet(
     activeTab: EditTab,
     onTab: (EditTab) -> Unit,
     count: Int,
+    templates: List<FrameTemplate>,
+    swatchPreviews: Map<String, Bitmap>,
     templateIds: List<String>,
     currentPage: Int,
     applyToAll: Boolean,
@@ -470,10 +498,11 @@ private fun BottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(24.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    FrameRenderer.all.forEach { template ->
+                    templates.forEach { template ->
                         SwatchTile(
-                            templateId = template.id,
-                            selected = templateIds.getOrElse(currentPage) { "classic" } == template.id,
+                            template = template,
+                            preview = swatchPreviews[template.id],
+                            selected = templateIds.getOrElse(currentPage) { templates.first().id } == template.id,
                             onClick = { onSelectTemplate(template.id) },
                         )
                     }
@@ -540,8 +569,7 @@ private fun TabLabel(text: String, active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun SwatchTile(templateId: String, selected: Boolean, onClick: () -> Unit) {
-    val meta = TemplateLabels.byId[templateId]
+private fun SwatchTile(template: FrameTemplate, preview: Bitmap?, selected: Boolean, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.clickable(
@@ -552,18 +580,28 @@ private fun SwatchTile(templateId: String, selected: Boolean, onClick: () -> Uni
     ) {
         Box(
             Modifier
-                .width(48.dp)
-                .height(64.dp)
+                .width(58.dp)
+                .height(76.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(Color(meta?.swatch ?: 0xFFFFFFFF))
+                .background(Color(template.swatchColor))
                 .then(
                     if (selected) Modifier.border(2.dp, GlassColors.Accent, RoundedCornerShape(6.dp))
                     else Modifier.border(0.5.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
                 ),
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            if (preview != null) {
+                Image(
+                    bitmap = preview.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().padding(4.dp),
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Text(
-            meta?.zh ?: templateId,
+            template.zhName,
             color = if (selected) GlassColors.Accent else Color.White.copy(alpha = 0.8f),
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
