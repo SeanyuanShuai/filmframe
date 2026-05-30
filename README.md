@@ -2,7 +2,7 @@
 
 > Wrap a photo in a photographer's frame and let its EXIF write the caption.
 
-JustFrame puts a clean editorial border around your photo and fills the caption straight from the file: camera, lens, aperture, shutter, ISO. Pick a template, import, export. Everything runs on-device. No photo ever leaves your phone.
+JustFrame puts a clean editorial border around your photo and fills the caption straight from the file: camera, lens, aperture, shutter, ISO. Pick a style, import, export. Everything runs on-device. No photo ever leaves your phone.
 
 > **Status: v0.2, pre-alpha.** Built in the open as a vibe-coding learning project with Claude Code. Expect rough edges.
 
@@ -10,12 +10,13 @@ JustFrame puts a clean editorial border around your photo and fills the caption 
 
 - Import from your gallery through a built-in picker; up to 30 photos at once for batch framing.
 - Caption filled from EXIF: camera, lens, aperture, shutter, ISO.
-- Five templates: Classic (经典留白), Bold (高反差), Solid (纯色底), Minimal (极简无界), Polaroid (宝丽来复古).
-- Auto border detection strips an in-camera frame first — a phone's built-in Hasselblad/Leica border, say — so you don't end up with a frame inside a frame.
-- Per-photo adjustments: border width, caption font size, custom caption text, optional watermark.
-- Export up to original resolution, with the source EXIF written back into the output. Files save to Pictures/JustFrame and are **never uploaded anywhere**.
+- Template groups — pick a style family on the home screen, and the editor shows only that group's variants, each previewed live on your own photo. Shipped so far: 杂志留白 Editorial Margin, 美术馆装裱 Passepartout, 片边底纹 Rebate (35mm sprocket edges), three variants each.
+- Auto-removes a phone's built-in watermark frame first — the bottom Hasselblad / Leica / Zeiss / XMAGE bar, or a 4-side mat — so you don't get a frame inside a frame.
+- Per-photo adjustments: border width, caption size, EXIF caption on/off, optional watermark. Hold to compare with the original.
+- Export up to original resolution, with the source EXIF written back into the output (toggleable). Files save to Pictures/JustFrame and are **never uploaded anywhere**.
+- Tiered haptics on key actions, a frosted-glass tab bar, and a portrait lock.
 
-Frames render on a Canvas (no OpenCV). Captions are set in Cormorant, DM Serif Display, and Inter, all OFL-licensed and bundled.
+Frames render on a Canvas (no OpenCV). The UI is set in an editorial Chinese/Latin serif (Source Han Serif, subset and bundled); rendered captions use Cormorant, DM Serif Display, and Inter. All fonts are OFL-licensed.
 
 ## Tech
 
@@ -30,19 +31,18 @@ Open the project in Android Studio, plug in a device (or start an emulator), and
 
 ## Roadmap
 
-The import → frame → export loop is done, across five templates and batch mode. Next up:
+The import → frame → export loop is done, across three template groups and batch mode. Next up:
 
+- [ ] Two more groups: 印样校样 Contact Sheet (darkroom proof annotations) and 跨幅长卷 Carousel (multi-tile panorama export)
 - [ ] Custom templates: editable ratios, fonts, and logo position, saved as presets
-- [ ] Aspect presets for Instagram and 小红书
-- [ ] Polish pass on the new three-tab interaction
 
 Already shipped:
 
-- [x] Pick photos, read EXIF, render frames on device
-- [x] Five built-in templates with live switching
-- [x] Full-resolution export with EXIF preserved
-- [x] Batch processing
-- [x] Interaction redesign — three-tab layout (Gallery / Create / Settings), one immersive editor, Hasselblad-orange accent
+- [x] Pick photos, read EXIF, render frames on device; full-resolution export with EXIF preserved
+- [x] Batch processing, per-photo styling
+- [x] Template groups — home picks a style family; the editor shows that group's variants with live per-photo previews
+- [x] Auto-remove of phone watermark frames, including bottom-bar watermarks (Hasselblad / Leica / Zeiss / XMAGE)
+- [x] Three-tab layout (Gallery / Create / Settings), one immersive editor, Hasselblad-orange accent, editorial serif UI
 
 ## License
 

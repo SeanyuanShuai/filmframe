@@ -138,20 +138,20 @@ app/src/main/java/com/seanyuan/filmframe/
 │   ├── PhotoExif.kt             # data class（纯 Kotlin） ★ iOS 可直接搬
 │   └── Settings.kt              # DataStore Preferences 存储
 ├── frame/                       # 边框处理核心
-│   ├── FrameDetector.kt         # 双 pass 检测；exposes detectFromPixels() ★ 纯算法可移植
-│   ├── FrameRenderer.kt         # 5 模板渲染（Canvas）
+│   ├── FrameDetector.kt         # 四边裱框 + 底栏水印条检测；exposes detectFromPixels() ★ 纯算法可移植
+│   ├── FrameRenderer.kt         # 模板组（FrameGroup）+ 各组模板 Canvas 渲染；FrameTemplate 带 zhName/swatchColor
 │   ├── FrameProcessor.kt        # 流水线编排
 │   ├── TemplateAdjustments.kt   # 调整 data class ★ iOS 可搬
 │   └── Fonts.kt                 # Typeface lazy load
 └── ui/                          # 全 Compose（v4.2 交互大改版后）
     ├── glass/Glass.kt           # Liquid Glass 组件；GlassColors.Accent = 哈苏橙 #F05023
     ├── nav/AppNav.kt            # Tab 枚举（画廊/创作/设置）+ 浮动玻璃底部导航
-    ├── TemplateLabels.kt        # 模板中文名/英文副标题/swatch 色映射
-    ├── create/CreateScreen.kt   # 创作 Tab：5 模板堆叠卡横滑 + 导入照片（默认 Tab）
+    ├── Haptics.kt               # 分级震动反馈（tick/light/medium/success）
+    ├── create/CreateScreen.kt   # 创作 Tab：模板组堆叠卡横滑 + 导入照片（默认 Tab）
     ├── gallery/GalleryScreen.kt # 画廊 Tab：已导出成品自动滚动陈列（纯展示不可点）
     ├── picker/PhotoPickerScreen # 自建 MediaStore 选择器（保留；选完进统一编辑页）
-    ├── edit/EditScreen.kt       # 统一沉浸式编辑页：横滑相册 + 导出 N + 选择边框/调整参数双 Tab
-    │                            #   + 一键应用 + 旋钮 + sparkles 去边框 + 处理中/完成浮层
+    ├── edit/EditScreen.kt       # 统一沉浸编辑页：横滑相册 + 导出 N + 按住对比原图 + 选择边框/调整参数双 Tab
+    │                            #   + 只显示该组模板（swatch=当前照片实时预览）+ 逐张调参 + 一键应用 + 旋钮 + sparkles 去边框 + 完成浮层
     ├── settings/SettingsScreen  # 设置 Tab：水平四档画质滑块 / 智能检测 / 水印·EXIF / 偏好
     └── theme/                   # Color / Theme / Type（FilmFrameTheme）
 ```
@@ -165,13 +165,13 @@ app/src/main/java/com/seanyuan/filmframe/
 ```
 Main (depth 0) ── 底部三 Tab，Crossfade 切换；只有 Main 显示 BottomNav
   ├─ Tab.Gallery   已导出成品陈列（纯展示）
-  ├─ Tab.Create    模板横滑选择器（默认）── 点导入照片 → pendingTemplateId → Picker
+  ├─ Tab.Create    模板组横滑选择器（默认）── 点导入照片 → pendingGroupId → Picker
   └─ Tab.Settings  画质/检测/水印/偏好
-Picker (depth 1) ── 选完 uris → Edit(uris, pendingTemplateId)；空选 → 回 Main
-Edit(uris, presetTemplateId) (depth 2) ── 统一沉浸编辑页
+Picker (depth 1) ── 选完 uris → Edit(uris, pendingGroupId)；空选 → 回 Main
+Edit(uris, groupId) (depth 2) ── 统一沉浸编辑页；只显示该组模板，swatch 是当前照片实时小预览
        导出后完成浮层：分享 / 换个模板重做（关浮层回编辑）/ 返回主页（→ Tab.Create）
 ```
-关键状态：`screen` + `tab` + `pendingTemplateId`（Create 把选中模板带进 Picker→Edit）。
+关键状态：`screen` + `tab` + `pendingGroupId`（Create 把选中模板组带进 Picker→Edit）。
 单图也走 Edit（横滑相册 count=1）；导出循环复用 `FrameProcessor.loadFullForExport`
 + OOM 重试 + `ImageExporter.saveToGallery`（和旧 Home/Batch 同一套，逐张写进度）。
 
@@ -190,7 +190,7 @@ Edit(uris, presetTemplateId) (depth 2) ── 统一沉浸编辑页
 |---|---|
 | 所有 data class | `PhotoExif`、`FrameInsets`、`FrameDetectionResult`、`TemplateAdjustments`、`ExportQuality`、`WatermarkSettings`、`WatermarkPosition` |
 | `FrameDetector.detectFromPixels(IntArray, w, h)` | ★ 已显式暴露纯 API。iOS / KMP 直接调用 |
-| 模板比例常数 | `ClassicTemplate.sideMarginPct = 0.05f` 等 |
+| 模板比例常数 | 各模板的 margin/band 百分比常数（如 `PasseSingle.sidePct`、`RebateFull.bandPct`） |
 | 字符串格式化 | `composeTitle`、`composeParams`、formatFocal/Aperture/Shutter |
 | EXIF tag 列表 | `EXIF_TAGS_TO_COPY` 数组 |
 
