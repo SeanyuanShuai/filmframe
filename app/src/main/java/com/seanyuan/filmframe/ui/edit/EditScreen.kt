@@ -6,12 +6,6 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -85,6 +79,7 @@ import com.seanyuan.filmframe.frame.ProcessedSource
 import com.seanyuan.filmframe.frame.TemplateAdjustments
 import com.seanyuan.filmframe.ui.TemplateLabels
 import com.seanyuan.filmframe.ui.glass.GlassColors
+import com.seanyuan.filmframe.ui.rememberHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -94,9 +89,9 @@ private enum class EditTab { Template, Adjust }
 
 /**
  * Unified immersive editor. Replaces the old single-photo editor, batch screen
- * and both result screens. Always a horizontal carousel of the picked photos
- * (1..N) with a per-photo template and a global adjust set; export writes all
- * of them and shows the done overlay.
+ * and both result screens. A horizontal carousel of the picked photos (1..N),
+ * each with its OWN template, strip flag and adjust set; the 一键应用 toggle
+ * makes a change spill to every photo. Export writes all of them.
  */
 @Composable
 fun EditScreen(
@@ -108,6 +103,7 @@ fun EditScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
 
     val watermark by Settings.watermark(context).collectAsState(initial = WatermarkSettings.Default)
     val exportQuality by Settings.exportQuality(context).collectAsState(initial = ExportQuality.Original)
@@ -116,10 +112,15 @@ fun EditScreen(
     val count = uris.size
     val templateIds = remember { mutableStateListOf<String>().apply { repeat(count) { add(presetTemplateId) } } }
     val stripFlags = remember { mutableStateListOf<Boolean>().apply { repeat(count) { add(false) } } }
+    // Per-photo adjustments — each photo carries its own border/caption tuning.
+    val adjustments = remember { mutableStateListOf<TemplateAdjustments>().apply { repeat(count) { add(TemplateAdjustments.Default) } } }
     val sources = remember { mutableStateMapOf<Int, ProcessedSource>() }
     val previews = remember { mutableStateMapOf<Int, Bitmap>() }
+    // Signature of the inputs each cached preview was rendered from. The render
+    // pass swaps a preview in place only when its signature changes, so the old
+    // bitmap stays on screen until the new one is ready — no flash to a spinner.
+    val renderedSig = remember { mutableStateMapOf<Int, Int>() }
 
-    var adjustments by remember { mutableStateOf(TemplateAdjustments.Default) }
     var applyToAll by remember { mutableStateOf(false) }
     var activeTab by remember { mutableStateOf(EditTab.Template) }
     var renderEpoch by remember { mutableIntStateOf(0) }
@@ -136,20 +137,27 @@ fun EditScreen(
         snapshotFlow { pagerState.currentPage }.collect { currentPage = it }
     }
 
-    fun invalidate(all: Boolean, index: Int = currentPage) {
-        if (all) previews.clear() else previews.remove(index)
-        renderEpoch++
+    fun signature(i: Int): Int {
+        var s = templateIds[i].hashCode()
+        s = s * 31 + if (stripFlags[i]) 1 else 0
+        s = s * 31 + adjustments[i].hashCode()
+        s = s * 31 + watermark.hashCode()
+        return s
     }
 
     fun selectTemplate(id: String) {
-        if (applyToAll) {
-            for (i in 0 until count) templateIds[i] = id
-            invalidate(all = true)
-        } else {
-            templateIds[currentPage] = id
-            invalidate(all = false)
-        }
+        if (applyToAll) for (i in 0 until count) templateIds[i] = id
+        else templateIds[currentPage] = id
+        renderEpoch++
+        haptics.light()
         scope.launch { Settings.updateLastTemplate(context, id) }
+    }
+
+    fun setAdjustments(new: TemplateAdjustments) {
+        if (applyToAll) for (i in 0 until count) adjustments[i] = new
+        else adjustments[currentPage] = new
+        renderEpoch++
+        haptics.tick()
     }
 
     // Load source + EXIF + frame detection for the visible window.
@@ -162,27 +170,36 @@ fun EditScreen(
                 if (ps != null) {
                     sources[i] = ps
                     stripFlags[i] = ps.detection.hasFrame && autoRemove
-                    invalidate(all = false, index = i)
+                    renderEpoch++
                 }
             }
         }
     }
 
-    // Debounced render for the visible window.
+    // Debounced render for the visible window. Swaps in place; evicts far pages
+    // to bound memory on long batches.
     LaunchedEffect(currentPage, renderEpoch) {
         delay(70)
+        val keep = (currentPage - 3)..(currentPage + 3)
+        previews.keys.filter { it !in keep }.toList().forEach {
+            previews.remove(it); renderedSig.remove(it)
+        }
         for (i in (currentPage - 1)..(currentPage + 1)) {
-            if (i in 0 until count && previews[i] == null) {
-                val ps = sources[i] ?: continue
-                val template = FrameRenderer.byId(templateIds[i])
-                val out = withContext(Dispatchers.Default) {
-                    try {
-                        FrameProcessor.render(context, ps, template, stripFlags[i], watermark, adjustments)
-                    } catch (_: OutOfMemoryError) {
-                        null
-                    }
+            if (i !in 0 until count) continue
+            val ps = sources[i] ?: continue
+            val want = signature(i)
+            if (previews[i] != null && renderedSig[i] == want) continue
+            val template = FrameRenderer.byId(templateIds[i])
+            val out = withContext(Dispatchers.Default) {
+                try {
+                    FrameProcessor.render(context, ps, template, stripFlags[i], watermark, adjustments[i])
+                } catch (_: OutOfMemoryError) {
+                    null
                 }
-                if (out != null) previews[i] = out
+            }
+            if (out != null) {
+                previews[i] = out
+                renderedSig[i] = want
             }
         }
     }
@@ -192,6 +209,10 @@ fun EditScreen(
             delay(2000)
             toast = ""
         }
+    }
+
+    LaunchedEffect(exportDone) {
+        if (exportDone) haptics.success()
     }
 
     fun startExport() {
@@ -213,7 +234,7 @@ fun EditScreen(
                         try {
                             val bmp = FrameProcessor.render(
                                 context, full, FrameRenderer.byId(templateIds[i]),
-                                stripFlags[i], watermark, adjustments,
+                                stripFlags[i], watermark, adjustments[i],
                             )
                             return@withContext ImageExporter.saveToGallery(context, bmp, uri, full.loaded, exportQuality)
                         } catch (_: OutOfMemoryError) {
@@ -241,6 +262,7 @@ fun EditScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 36.dp, end = 36.dp, top = 100.dp, bottom = 280.dp),
             pageSpacing = 16.dp,
+            beyondViewportPageCount = 1,
         ) { page ->
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 val bmp = previews[page]
@@ -293,7 +315,7 @@ fun EditScreen(
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = 0.4f))
                     .border(0.5.dp, Color.White.copy(alpha = 0.1f), CircleShape)
-                    .clickable { onBack() },
+                    .clickable { haptics.tick(); onBack() },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.ChevronLeft, "返回", tint = Color.White.copy(alpha = 0.9f), modifier = Modifier.size(26.dp))
@@ -304,7 +326,7 @@ fun EditScreen(
                     .height(40.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(GlassColors.Accent)
-                    .clickable { startExport() }
+                    .clickable { haptics.medium(); startExport() }
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -315,22 +337,25 @@ fun EditScreen(
         // Bottom control sheet
         BottomSheet(
             activeTab = activeTab,
-            onTab = { activeTab = it },
+            onTab = { haptics.tick(); activeTab = it },
+            count = count,
             templateIds = templateIds,
             currentPage = currentPage,
             applyToAll = applyToAll,
-            onApplyToAll = { applyToAll = it },
+            onApplyToAll = { haptics.tick(); applyToAll = it },
             onSelectTemplate = ::selectTemplate,
-            adjustments = adjustments,
-            onAdjustments = { adjustments = it; invalidate(all = true) },
+            adjustments = adjustments.getOrElse(currentPage) { TemplateAdjustments.Default },
+            onAdjustments = ::setAdjustments,
             stripOn = stripFlags.getOrElse(currentPage) { false },
             hasFrame = sources[currentPage]?.detection?.hasFrame == true,
             onToggleStrip = {
                 if (sources[currentPage]?.detection?.hasFrame == true) {
                     stripFlags[currentPage] = !stripFlags[currentPage]
-                    invalidate(all = false)
+                    renderEpoch++
+                    haptics.light()
                 } else {
                     toast = "未检索到原图边框"
+                    haptics.tick()
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -341,9 +366,9 @@ fun EditScreen(
         if (exportDone) {
             ExportDoneOverlay(
                 count = savedUris.size,
-                onShare = { shareImages(context, savedUris) },
-                onRemix = { exportDone = false },
-                onHome = onHome,
+                onShare = { haptics.light(); shareImages(context, savedUris) },
+                onRemix = { haptics.light(); exportDone = false },
+                onHome = { haptics.light(); onHome() },
             )
         }
     }
@@ -353,6 +378,7 @@ fun EditScreen(
 private fun BottomSheet(
     activeTab: EditTab,
     onTab: (EditTab) -> Unit,
+    count: Int,
     templateIds: List<String>,
     currentPage: Int,
     applyToAll: Boolean,
@@ -375,26 +401,38 @@ private fun BottomSheet(
                 Brush.verticalGradient(0f to Color.White.copy(alpha = 0.1f), 1f to Color.Transparent),
                 RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
             )
-            .padding(top = 20.dp),
+            .padding(top = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.fillMaxWidth().height(140.dp)) {
-            if (activeTab == EditTab.Template) {
-                // 一键应用 checkbox
+        // 一键应用 — global "apply this change to every photo" flag, governing
+        // both template picks and adjust tweaks. Only meaningful for batches.
+        if (count > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 24.dp, bottom = 4.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Row(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(end = 24.dp)
-                        .clickable { onApplyToAll(!applyToAll) },
                     verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onApplyToAll(!applyToAll) },
                 ) {
                     CheckBox(checked = applyToAll, size = 14)
                     Spacer(Modifier.width(6.dp))
-                    Text("一键应用", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, letterSpacing = 1.sp)
+                    Text("一键应用全部", color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, letterSpacing = 1.sp)
                 }
+            }
+        }
+
+        Box(Modifier.fillMaxWidth().height(132.dp)) {
+            if (activeTab == EditTab.Template) {
                 Row(
                     modifier = Modifier
-                        .align(Alignment.BottomStart)
+                        .align(Alignment.Center)
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp, vertical = 8.dp),
@@ -420,14 +458,15 @@ private fun BottomSheet(
             }
         }
 
-        // Bottom tab bar
-        Row(
+        // Divider
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 12.dp)
+                .padding(top = 8.dp)
                 .height(0.5.dp)
                 .background(Color.White.copy(alpha = 0.1f)),
-        ) {}
+        )
+        // Bottom tab bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -541,7 +580,10 @@ private fun AdjustPanel(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { onAdjustments(adjustments.copy(showCaption = !adjustments.showCaption)) },
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onAdjustments(adjustments.copy(showCaption = !adjustments.showCaption)) },
             ) {
                 CheckBox(checked = adjustments.showCaption, size = 16)
                 Spacer(Modifier.width(8.dp))
@@ -549,7 +591,10 @@ private fun AdjustPanel(
             }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { onAdjustments(TemplateAdjustments.Default) },
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onAdjustments(TemplateAdjustments.Default) },
             ) {
                 Icon(Icons.Rounded.Refresh, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(14.dp))
                 Spacer(Modifier.width(8.dp))

@@ -63,6 +63,7 @@ import com.seanyuan.filmframe.data.MediaGallery
 import com.seanyuan.filmframe.ui.glass.GlassButton
 import com.seanyuan.filmframe.ui.glass.GlassColors
 import com.seanyuan.filmframe.ui.glass.GlassSurface
+import com.seanyuan.filmframe.ui.rememberHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -73,6 +74,7 @@ fun PhotoPickerScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val haptics = rememberHaptics()
     val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_IMAGES
     } else {
@@ -195,6 +197,7 @@ fun PhotoPickerScreen(
                         accent = true,
                         enabled = selectedIds.isNotEmpty(),
                         onClick = {
+                            haptics.medium()
                             val uris = entries
                                 .filter { it.id in selectedIds }
                                 .map { it.uri }

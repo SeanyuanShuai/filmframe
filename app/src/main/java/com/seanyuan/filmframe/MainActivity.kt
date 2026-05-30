@@ -34,6 +34,8 @@ import com.seanyuan.filmframe.ui.nav.Tab
 import com.seanyuan.filmframe.ui.picker.PhotoPickerScreen
 import com.seanyuan.filmframe.ui.settings.SettingsScreen
 import com.seanyuan.filmframe.ui.theme.FilmFrameTheme
+import dev.chrisbanes.haze.hazeSource
+import dev.chrisbanes.haze.rememberHazeState
 
 private sealed interface Screen {
     val depth: Int
@@ -125,8 +127,14 @@ private fun MainTabs(
     onImport: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hazeState = rememberHazeState()
     Box(modifier = modifier.background(GlassColors.DeepBackground)) {
-        Crossfade(targetState = tab, animationSpec = tween(260), label = "tab") { t ->
+        Crossfade(
+            targetState = tab,
+            animationSpec = tween(260),
+            label = "tab",
+            modifier = Modifier.fillMaxSize().hazeSource(hazeState),
+        ) { t ->
             when (t) {
                 Tab.Gallery -> GalleryScreen(modifier = Modifier.fillMaxSize())
                 Tab.Create -> CreateScreen(onImport = onImport, modifier = Modifier.fillMaxSize())
@@ -136,6 +144,7 @@ private fun MainTabs(
         BottomNav(
             current = tab,
             onSelect = onTab,
+            hazeState = hazeState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }

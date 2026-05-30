@@ -64,6 +64,7 @@ import com.seanyuan.filmframe.data.Settings
 import com.seanyuan.filmframe.data.WatermarkPosition
 import com.seanyuan.filmframe.data.WatermarkSettings
 import com.seanyuan.filmframe.ui.glass.GlassColors
+import com.seanyuan.filmframe.ui.rememberHaptics
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -234,10 +235,11 @@ private fun ToggleRow(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true,
 ) {
+    val haptics = rememberHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .clickable(enabled = enabled) { haptics.light(); onCheckedChange(!checked) }
             .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -255,10 +257,11 @@ private fun NavRow(
     value: String?,
     onClick: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .clickable { haptics.tick(); onClick() }
             .padding(vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -309,6 +312,7 @@ private fun OrangeToggle(checked: Boolean) {
 @Composable
 private fun QualitySlider(index: Int, onIndex: (Int) -> Unit, modifier: Modifier = Modifier) {
     val density = LocalDensity.current
+    val haptics = rememberHaptics()
     var widthPx by remember { mutableStateOf(1) }
     val count = QUALITY_LABELS.size
 
@@ -319,9 +323,17 @@ private fun QualitySlider(index: Int, onIndex: (Int) -> Unit, modifier: Modifier
             .height(52.dp)
             .onSizeChanged { widthPx = it.width }
             .pointerInput(count) {
+                // Local to the gesture loop so it survives across drag events
+                // without depending on the recomposing `index` prop.
+                var lastIndex = -1
                 fun pick(x: Float) {
                     val pct = (x / widthPx).coerceIn(0f, 1f)
-                    onIndex(Math.round(pct * (count - 1)))
+                    val next = Math.round(pct * (count - 1))
+                    if (next != lastIndex) {
+                        lastIndex = next
+                        haptics.tick()
+                        onIndex(next)
+                    }
                 }
                 // onDragStart fires on touch-down, so a plain tap on a node sets
                 // it too — no separate tap detector needed.

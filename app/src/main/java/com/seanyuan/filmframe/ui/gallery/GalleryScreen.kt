@@ -164,10 +164,10 @@ private fun Carousel(entries: List<GalleryEntry>, modifier: Modifier = Modifier)
     }
     val pagerState = rememberPagerState(pageCount = { entries.size })
 
-    // Auto-advance every 4s, paused while the user is dragging.
+    // Auto-advance every 3s, paused while the user is dragging.
     LaunchedEffect(pagerState, entries.size) {
         while (true) {
-            delay(4000)
+            delay(3000)
             if (!pagerState.isScrollInProgress && entries.size > 1) {
                 val next = (pagerState.currentPage + 1) % entries.size
                 pagerState.animateScrollToPage(next, animationSpec = tween(900))
@@ -181,6 +181,7 @@ private fun Carousel(entries: List<GalleryEntry>, modifier: Modifier = Modifier)
         contentPadding = PaddingValues(horizontal = 56.dp),
         pageSpacing = 24.dp,
         pageSize = PageSize.Fill,
+        beyondViewportPageCount = 1,
     ) { page ->
         val offset = (pagerState.currentPage - page + pagerState.currentPageOffsetFraction)
             .absoluteValue.coerceIn(0f, 1f)

@@ -51,6 +51,7 @@ import com.seanyuan.filmframe.data.MediaGallery
 import com.seanyuan.filmframe.frame.FrameRenderer
 import com.seanyuan.filmframe.ui.TemplateLabels
 import com.seanyuan.filmframe.ui.glass.GlassColors
+import com.seanyuan.filmframe.ui.rememberHaptics
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -70,6 +71,7 @@ fun CreateScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val haptics = rememberHaptics()
     val templates = remember { FrameRenderer.all }
 
     val pagerState = rememberPagerState(pageCount = { templates.size })
@@ -119,6 +121,7 @@ fun CreateScreen(
                 contentPadding = PaddingValues(horizontal = 44.dp),
                 pageSpacing = 20.dp,
                 pageSize = PageSize.Fill,
+                beyondViewportPageCount = 2,
             ) { page ->
                 val offset = (pagerState.currentPage - page + pagerState.currentPageOffsetFraction)
                     .absoluteValue.coerceIn(0f, 1f)
@@ -138,7 +141,7 @@ fun CreateScreen(
         }
 
         ImportButton(
-            onClick = { onImport(templates[activeIndex].id) },
+            onClick = { haptics.medium(); onImport(templates[activeIndex].id) },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()

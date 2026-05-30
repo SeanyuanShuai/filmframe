@@ -36,6 +36,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import com.seanyuan.filmframe.ui.rememberHaptics
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
 
 /** Three primary destinations. Create is the default landing. */
 enum class Tab(val label: String, val icon: ImageVector) {
@@ -53,8 +57,10 @@ enum class Tab(val label: String, val icon: ImageVector) {
 fun BottomNav(
     current: Tab,
     onSelect: (Tab) -> Unit,
+    hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
+    val haptics = rememberHaptics()
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -67,11 +73,18 @@ fun BottomNav(
                 .fillMaxWidth()
                 .height(64.dp)
                 .clip(RoundedCornerShape(32.dp))
-                .background(Color(0xFF111111).copy(alpha = 0.72f))
+                // Real frosted glass — blurs whatever screen content sits behind
+                // the pill, tinted dark so labels stay legible over any photo.
+                .hazeEffect(state = hazeState) {
+                    backgroundColor = Color(0xFF0A0A0A)
+                    tints = listOf(HazeTint(Color(0xFF141414).copy(alpha = 0.55f)))
+                    blurRadius = 28.dp
+                    noiseFactor = 0.04f
+                }
                 .border(
                     0.8.dp,
                     Brush.verticalGradient(
-                        0f to Color.White.copy(alpha = 0.16f),
+                        0f to Color.White.copy(alpha = 0.18f),
                         1f to Color.White.copy(alpha = 0.04f),
                     ),
                     RoundedCornerShape(32.dp),
@@ -83,7 +96,7 @@ fun BottomNav(
                 TabItem(
                     tab = tab,
                     selected = tab == current,
-                    onClick = { onSelect(tab) },
+                    onClick = { if (tab != current) haptics.tick(); onSelect(tab) },
                     modifier = Modifier.weight(1f).fillMaxSize(),
                 )
             }

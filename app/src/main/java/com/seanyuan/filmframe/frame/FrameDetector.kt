@@ -20,33 +20,39 @@ data class FrameDetectionResult(
 }
 
 /**
- * v3 — solves both the v1 'leaves residual edges on OPPO HASSELBLAD' bug AND
- * the v2 'aggressively crops dark photos into a 1cm strip' regression.
+ * v4 — robust frame-color voting + 3-of-4-side acceptance.
  *
- * Approach: two-pass walk per edge.
+ * The v3 detector missed obvious frames in two situations the dogfood surfaced:
  *
- *   STRICT pass (0.92 match / 3 miss tolerance):
- *     "Is there actually a frame on this side?" Strict thresholds avoid
- *     false positives on photos where the corner happens to be near-uniform
- *     (dark sky, snow, bokeh). If strict gives < MIN_FRAME_RATIO inset on
- *     any side, we declare 'no frame' and return.
+ *   1. A logo, brand text, or uneven light in ONE corner (Leica red dot,
+ *      "HASSELBLAD" wordmark, a date stamp) pushed the 4-corner colour spread
+ *      over a hard variance gate and the detector bailed with "no frame".
  *
- *   LOOSE pass (0.75 match / 10 miss tolerance):
- *     "How far does the frame actually extend?" Only run when strict
- *     confirms a frame. The loose pass walks past anti-aliased fringe and
- *     dark text bands (the OPPO HASSELBLAD bottom mat case).
+ *   2. A frame the photo bleeds into on one edge (content runs to one side,
+ *      a 3-sided mat) failed the all-four-sides requirement and was dropped
+ *      wholesale, even though three clean framed sides were right there.
  *
- *   Anti-runaway cap:
- *     Loose inset is capped at strict_inset × 3. Typical frame extension
- *     past strict boundary is just a few text rows (1.5-2× max). A loose
- *     inset 40× the strict inset means LOOSE ran away into photo content —
- *     fall back to strict on that side.
+ * Fixes:
  *
- *   Safety margin (0.6% of dim) added after the cap, then everything
- *   maxed at 50% of dim.
+ *   FRAME COLOUR by vote, not median. Sample 8 points around the border
+ *   (4 corners + 4 edge midpoints), then take the largest cluster within
+ *   tolerance as the frame colour. One odd corner (logo/text) is outvoted by
+ *   the other seven, instead of derailing the whole detection. If no majority
+ *   colour exists (top sky vs bottom ground, a busy edge) there's no uniform
+ *   border — return no-frame.
  *
- * Out of scope: rounded corner frames, gradient frames, polaroid-style
- * (top-only inset), non-rectangular masks.
+ *   SIDES detected independently, frame confirmed at 3-of-4. Each side still
+ *   has to prove a full-span uniform run of the frame colour (the real
+ *   false-positive guard — a side only "passes" if its entire outer row/column
+ *   is frame-coloured, which sky/ground/bokeh photos can't fake on the
+ *   verticals). A side that doesn't pass simply gets inset 0 — we crop the
+ *   framed sides and leave the bleeding one alone.
+ *
+ * Two-pass walk per passing side is unchanged from v3: a STRICT pass proves the
+ * frame exists, a LOOSE pass extends past caption text / AA fringe, capped at
+ * strict×6 so it can't run away into photo content. Safety margin + 50% hard cap.
+ *
+ * Out of scope: rounded-corner frames, gradient frames, non-rectangular masks.
  */
 object FrameDetector {
 
@@ -64,14 +70,19 @@ object FrameDetector {
     private const val LOOSE_MISS_TOLERANCE_MAX = 80
     private const val MIN_FRAME_RATIO = 0.012f  // 1.2% of dim — typical real frames are >5%
     private const val CORNER_SAMPLE_FRACTION = 0.05f
-    private const val CORNER_INTRA_VARIANCE_LIMIT = 18
-    // Increased from 3× — text-heavy HASSELBLAD mats break strict pass early,
-    // so loose has to extend further. Still bounded so a near-uniform photo
-    // (snow, dark sky) doesn't get cropped in half.
+    // Border-colour vote: 8 samples, largest cluster wins. Need a majority (5/8)
+    // agreeing within tolerance to call it a uniform border at all. Cluster
+    // tolerance is a touch looser than the pixel-match tolerance so a faintly
+    // vignetted white mat still votes together.
+    private const val BORDER_SAMPLES = 8
+    private const val MIN_BORDER_CLUSTER = 5
+    private const val CLUSTER_TOLERANCE = 26
+    // Confirm a frame at 3 of 4 sides — one bleeding edge is allowed. Fewer than
+    // 3 clean framed sides is more likely a false positive than a real frame.
+    private const val MIN_FRAMED_SIDES = 3
+    // Text-heavy mats break strict early, so loose extends further. Still bounded
+    // so a near-uniform photo doesn't get cropped in half.
     private const val LOOSE_OVER_STRICT_CAP = 6f
-    // 1.2% safety margin — at typical export 6000px long edge this is 72px,
-    // enough to cover 1-2 analysis-px detection error (= 10-20 source px) plus
-    // AA fringe. Was 0.6% which left a hairline residual on dogfood.
     private const val SAFETY_INSET_RATIO = 0.012f
     private const val MAX_INSET_RATIO = 0.5f
 
@@ -109,23 +120,21 @@ object FrameDetector {
 
     /**
      * Pure-Kotlin detection given an IntArray of ARGB pixels and dimensions.
-     * No Android dependencies — usable as-is in KMP shared module or
-     * ported verbatim to Swift on iOS.
+     * No Android dependencies — usable as-is in a KMP shared module or ported
+     * verbatim to Swift on iOS.
      *
-     * Inset values returned are in the SAME pixel space as the input
-     * (i.e., already at analysis resolution). Callers in lazier languages
-     * can pass the original image directly if it's small enough.
+     * Inset values returned are in the SAME pixel space as the input.
      */
     fun detectFromPixels(pixels: IntArray, w: Int, h: Int): FrameDetectionResult {
-        val cornerColors = sampleCornerColors(pixels, w, h)
-        val cornerVar = maxColorSpread(cornerColors)
-        if (cornerVar > CORNER_INTRA_VARIANCE_LIMIT) {
-            return FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), cornerColors[0], 0f)
+        val ring = sampleBorderColors(pixels, w, h)
+        val (frameColor, clusterCount) = dominantColor(ring)
+        if (clusterCount < MIN_BORDER_CLUSTER) {
+            // No majority border colour → no uniform frame.
+            return FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), frameColor, 0f)
         }
 
-        val frameColor = medianColor(cornerColors)
-
-        // STRICT pass — does a real frame exist?
+        // STRICT pass per side — does a full-span uniform run of the frame
+        // colour exist on this edge? This is the false-positive guard.
         val strictTop = walkVertical(pixels, w, h, frameColor, fromTop = true,
             threshold = STRICT_ROW_THRESHOLD, missTol = STRICT_MISS_TOLERANCE)
         val strictBottom = walkVertical(pixels, w, h, frameColor, fromTop = false,
@@ -138,48 +147,30 @@ object FrameDetector {
         val minV = max(1, (h * MIN_FRAME_RATIO).toInt())
         val minH = max(1, (w * MIN_FRAME_RATIO).toInt())
 
-        val frameConfirmed = strictTop >= minV &&
-            strictBottom >= minV &&
-            strictLeft >= minH &&
-            strictRight >= minH
+        val passTop = strictTop >= minV
+        val passBottom = strictBottom >= minV
+        val passLeft = strictLeft >= minH
+        val passRight = strictRight >= minH
+        val framedSides = listOf(passTop, passBottom, passLeft, passRight).count { it }
 
-        if (!frameConfirmed) {
+        if (framedSides < MIN_FRAMED_SIDES) {
             return FrameDetectionResult(false, FrameInsets(0, 0, 0, 0), frameColor, 0f)
         }
 
-        // LOOSE pass — extend past text bands / AA fringe.
-        // Per-side adaptive miss tolerance: a thicker strict result implies a
-        // thicker real frame that may contain longer non-matching text rows.
-        val tolTop = looseMissTol(strictTop)
-        val tolBottom = looseMissTol(strictBottom)
-        val tolLeft = looseMissTol(strictLeft)
-        val tolRight = looseMissTol(strictRight)
-        val looseTop = walkVertical(pixels, w, h, frameColor, fromTop = true,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = tolTop)
-        val looseBottom = walkVertical(pixels, w, h, frameColor, fromTop = false,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = tolBottom)
-        val looseLeft = walkHorizontal(pixels, w, h, frameColor, fromLeft = true,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = tolLeft)
-        val looseRight = walkHorizontal(pixels, w, h, frameColor, fromLeft = false,
-            threshold = LOOSE_ROW_THRESHOLD, missTol = tolRight)
+        // LOOSE pass extends each PASSING side past caption text / AA fringe.
+        // A side that didn't pass strict gets inset 0 (left uncropped).
+        val topFinal = sideInset(passTop, strictTop, pixels, w, h, frameColor, vertical = true, fromStart = true)
+        val bottomFinal = sideInset(passBottom, strictBottom, pixels, w, h, frameColor, vertical = true, fromStart = false)
+        val leftFinal = sideInset(passLeft, strictLeft, pixels, w, h, frameColor, vertical = false, fromStart = true)
+        val rightFinal = sideInset(passRight, strictRight, pixels, w, h, frameColor, vertical = false, fromStart = false)
 
-        // Cap loose by strict×3 to prevent runaway into photo content.
-        val topInset = min(looseTop, (strictTop * LOOSE_OVER_STRICT_CAP).toInt())
-        val bottomInset = min(looseBottom, (strictBottom * LOOSE_OVER_STRICT_CAP).toInt())
-        val leftInset = min(looseLeft, (strictLeft * LOOSE_OVER_STRICT_CAP).toInt())
-        val rightInset = min(looseRight, (strictRight * LOOSE_OVER_STRICT_CAP).toInt())
-
-        // Safety margin + hard cap.
-        val safetyV = (h * SAFETY_INSET_RATIO).toInt()
-        val safetyH = (w * SAFETY_INSET_RATIO).toInt()
-        val capV = (h * MAX_INSET_RATIO).toInt()
-        val capH = (w * MAX_INSET_RATIO).toInt()
-        val topFinal = (topInset + safetyV).coerceAtMost(capV)
-        val bottomFinal = (bottomInset + safetyV).coerceAtMost(capV)
-        val leftFinal = (leftInset + safetyH).coerceAtMost(capH)
-        val rightFinal = (rightInset + safetyH).coerceAtMost(capH)
-
-        val confidence = computeConfidence(strictTop, strictBottom, strictLeft, strictRight, w, h)
+        val confidence = computeConfidence(
+            if (passTop) strictTop else 0,
+            if (passBottom) strictBottom else 0,
+            if (passLeft) strictLeft else 0,
+            if (passRight) strictRight else 0,
+            w, h,
+        )
 
         return FrameDetectionResult(
             hasFrame = true,
@@ -187,6 +178,26 @@ object FrameDetector {
             frameColor = frameColor,
             confidence = confidence,
         )
+    }
+
+    /** Loose-extend one passing side, cap, add safety margin, clamp. */
+    private fun sideInset(
+        passed: Boolean, strict: Int,
+        pixels: IntArray, w: Int, h: Int, frameColor: Int,
+        vertical: Boolean, fromStart: Boolean,
+    ): Int {
+        if (!passed) return 0
+        val tol = looseMissTol(strict)
+        val loose = if (vertical) {
+            walkVertical(pixels, w, h, frameColor, fromTop = fromStart, threshold = LOOSE_ROW_THRESHOLD, missTol = tol)
+        } else {
+            walkHorizontal(pixels, w, h, frameColor, fromLeft = fromStart, threshold = LOOSE_ROW_THRESHOLD, missTol = tol)
+        }
+        val capped = min(loose, (strict * LOOSE_OVER_STRICT_CAP).toInt())
+        val dim = if (vertical) h else w
+        val safety = (dim * SAFETY_INSET_RATIO).toInt()
+        val cap = (dim * MAX_INSET_RATIO).toInt()
+        return (capped + safety).coerceAtMost(cap)
     }
 
     private fun looseMissTol(strictInset: Int): Int {
@@ -203,15 +214,60 @@ object FrameDetector {
         return Bitmap.createScaledBitmap(source, nw, nh, true)
     }
 
-    private fun sampleCornerColors(pixels: IntArray, w: Int, h: Int): IntArray {
+    /** 4 corners + 4 edge midpoints, each averaged over a small patch. */
+    private fun sampleBorderColors(pixels: IntArray, w: Int, h: Int): IntArray {
         val sw = max(2, (w * CORNER_SAMPLE_FRACTION).toInt())
         val sh = max(2, (h * CORNER_SAMPLE_FRACTION).toInt())
+        val cx = ((w - sw) / 2).coerceAtLeast(0)
+        val cy = ((h - sh) / 2).coerceAtLeast(0)
         return intArrayOf(
-            averageRegion(pixels, w, 0, 0, sw, sh),
-            averageRegion(pixels, w, w - sw, 0, sw, sh),
-            averageRegion(pixels, w, 0, h - sh, sw, sh),
-            averageRegion(pixels, w, w - sw, h - sh, sw, sh),
+            averageRegion(pixels, w, 0, 0, sw, sh),            // top-left
+            averageRegion(pixels, w, w - sw, 0, sw, sh),       // top-right
+            averageRegion(pixels, w, 0, h - sh, sw, sh),       // bottom-left
+            averageRegion(pixels, w, w - sw, h - sh, sw, sh),  // bottom-right
+            averageRegion(pixels, w, cx, 0, sw, sh),           // top-mid
+            averageRegion(pixels, w, cx, h - sh, sw, sh),      // bottom-mid
+            averageRegion(pixels, w, 0, cy, sw, sh),           // left-mid
+            averageRegion(pixels, w, w - sw, cy, sw, sh),      // right-mid
         )
+    }
+
+    /**
+     * Largest cluster of samples within [CLUSTER_TOLERANCE]. Returns the
+     * cluster's average colour and how many samples agreed (out of 8). An
+     * outlier corner (logo/text) lands in a cluster of one and is ignored.
+     */
+    private fun dominantColor(samples: IntArray): Pair<Int, Int> {
+        var bestIndex = 0
+        var bestCount = 0
+        for (i in samples.indices) {
+            var count = 0
+            for (j in samples.indices) {
+                if (colorClose(samples[i], samples[j], CLUSTER_TOLERANCE)) count++
+            }
+            if (count > bestCount) {
+                bestCount = count
+                bestIndex = i
+            }
+        }
+        var r = 0L; var g = 0L; var b = 0L; var n = 0L
+        for (j in samples.indices) {
+            if (colorClose(samples[bestIndex], samples[j], CLUSTER_TOLERANCE)) {
+                r += (samples[j] shr 16) and 0xFF
+                g += (samples[j] shr 8) and 0xFF
+                b += samples[j] and 0xFF
+                n++
+            }
+        }
+        if (n == 0L) return samples[bestIndex] to bestCount
+        return rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt()) to bestCount
+    }
+
+    private fun colorClose(a: Int, b: Int, tol: Int): Boolean {
+        val dr = abs(((a shr 16) and 0xFF) - ((b shr 16) and 0xFF))
+        val dg = abs(((a shr 8) and 0xFF) - ((b shr 8) and 0xFF))
+        val db = abs((a and 0xFF) - (b and 0xFF))
+        return dr <= tol && dg <= tol && db <= tol
     }
 
     private fun averageRegion(pixels: IntArray, stride: Int, x: Int, y: Int, w: Int, h: Int): Int {
@@ -226,29 +282,8 @@ object FrameDetector {
                 n++
             }
         }
+        if (n == 0L) return rgb(0, 0, 0)
         return rgb((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
-    }
-
-    private fun maxColorSpread(colors: IntArray): Int {
-        var minR = 255; var maxR = 0
-        var minG = 255; var maxG = 0
-        var minB = 255; var maxB = 0
-        for (c in colors) {
-            val r = (c shr 16) and 0xFF
-            val g = (c shr 8) and 0xFF
-            val b = c and 0xFF
-            minR = min(minR, r); maxR = max(maxR, r)
-            minG = min(minG, g); maxG = max(maxG, g)
-            minB = min(minB, b); maxB = max(maxB, b)
-        }
-        return max(max(maxR - minR, maxG - minG), maxB - minB)
-    }
-
-    private fun medianColor(colors: IntArray): Int {
-        val rs = colors.map { (it shr 16) and 0xFF }.sorted()
-        val gs = colors.map { (it shr 8) and 0xFF }.sorted()
-        val bs = colors.map { it and 0xFF }.sorted()
-        return rgb(rs[rs.size / 2], gs[gs.size / 2], bs[bs.size / 2])
     }
 
     private fun rgb(r: Int, g: Int, b: Int): Int =
@@ -323,8 +358,8 @@ object FrameDetector {
         val bRatio = bottom.toFloat() / h
         val lRatio = left.toFloat() / w
         val rRatio = right.toFloat() / w
-        val minRatio = min(min(tRatio, bRatio), min(lRatio, rRatio))
         val avgRatio = (tRatio + bRatio + lRatio + rRatio) / 4
-        return min(1f, (minRatio * 8f + avgRatio * 2f).coerceIn(0f, 1f))
+        val framedSides = listOf(top, bottom, left, right).count { it > 0 }
+        return min(1f, (avgRatio * 4f + framedSides * 0.15f).coerceIn(0f, 1f))
     }
 }

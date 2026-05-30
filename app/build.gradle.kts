@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.coil.compose)
+    implementation(libs.haze)
     implementation(libs.androidx.exifinterface)
     implementation(libs.androidx.datastore.preferences)
     testImplementation(libs.junit)
